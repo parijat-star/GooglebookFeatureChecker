@@ -1,0 +1,342 @@
+package com.droid.googlebookfeaturechecker
+
+import android.app.Application
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.droid.googlebookfeaturechecker.data.SystemDeviceEnvironmentProvider
+import com.droid.googlebookfeaturechecker.model.DependencyActionType
+import com.droid.googlebookfeaturechecker.model.DependencyCheckItem
+import com.droid.googlebookfeaturechecker.model.DependencyId
+import com.droid.googlebookfeaturechecker.util.SecurityGuard
+import com.droid.googlebookfeaturechecker.util.SystemActionLauncher
+import com.droid.googlebookfeaturechecker.util.VersionComparator
+import com.droid.googlebookfeaturechecker.util.WifiIsolationAnalyzer
+import com.droid.googlebookfeaturechecker.util.WifiNetworkTelemetry
+import java.io.ByteArrayInputStream
+import kotlin.random.Random
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+
+@RunWith(AndroidJUnit4::class)
+@Config(application = Application::class)
+class FuzzAndSecurityTest {
+
+  private fun basePrivateWifiTelemetry() = WifiNetworkTelemetry(
+    hasWifiTransport = true,
+    hasEthernetTransport = false,
+    hasCellularTransport = false,
+    isCaptivePortal = false,
+    isRestricted = false,
+    isNotMetered = true,
+    isTrusted = true,
+    isVpnActive = false,
+    isOpenUnencryptedWifi = false,
+    isEnterpriseOrPasspointWifi = false,
+    isEphemeralOrCarrierMerged = false,
+    ssidOrNetworkHint = "\"Home_Fiber_5G\"",
+    ipv4Address = "192.168.1.42",
+    ipv4PrefixLength = 24,
+    gatewayReachableOrMulticastOk = true
+  )
+
+  @Test
+  fun wifiIsolationAnalyzer_acceptsGenuinePrivateHomeWifi() {
+    val result = WifiIsolationAnalyzer.analyze(basePrivateWifiTelemetry())
+    assertTrue(result.isPrivateHomeWifiMet)
+    assertFalse(result.isIsolationOrPublicDetected)
+    assertEquals("Home_Fiber_5G", result.connectedWifiName)
+    assertEquals("Connected to Wi-Fi: Home_Fiber_5G", result.statusSummary)
+    assertTrue(result.detailedExplanation.contains("private home Wi-Fi", ignoreCase = true))
+  }
+
+  @Test
+  fun wifiIsolationAnalyzer_triggersOnAllNonPrivateAndHostIsolatedNetworks() {
+    // 1. Disconnected / Cellular only
+    val disconnected = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(hasWifiTransport = false, hasCellularTransport = true)
+    )
+    assertFalse(disconnected.isPrivateHomeWifiMet)
+
+    // 2. Captive portal Wi-Fi
+    val captive = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isCaptivePortal = true)
+    )
+    assertFalse(captive.isPrivateHomeWifiMet)
+    assertTrue(captive.isIsolationOrPublicDetected)
+    assertTrue(captive.detailedExplanation.contains("Captive portal", ignoreCase = true))
+
+    // 3. Open / unencrypted Wi-Fi
+    val openWifi = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isOpenUnencryptedWifi = true)
+    )
+    assertFalse(openWifi.isPrivateHomeWifiMet)
+    assertTrue(openWifi.isIsolationOrPublicDetected)
+    assertTrue(openWifi.detailedExplanation.contains("Open unencrypted", ignoreCase = true))
+
+    // 4. Enterprise 802.1X / Passpoint Wi-Fi (client-to-client AP isolation)
+    val enterpriseEap = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isEnterpriseOrPasspointWifi = true)
+    )
+    assertFalse(enterpriseEap.isPrivateHomeWifiMet)
+    assertTrue(enterpriseEap.isIsolationOrPublicDetected)
+    assertTrue(enterpriseEap.detailedExplanation.contains("Enterprise", ignoreCase = true))
+
+    // 5. Untrusted / Restricted / Ephemeral / Carrier-merged Wi-Fi
+    val untrusted = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isTrusted = false)
+    )
+    assertFalse(untrusted.isPrivateHomeWifiMet)
+    assertTrue(untrusted.isIsolationOrPublicDetected)
+
+    val ephemeral = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isEphemeralOrCarrierMerged = true)
+    )
+    assertFalse(ephemeral.isPrivateHomeWifiMet)
+    assertTrue(ephemeral.isIsolationOrPublicDetected)
+
+    // 6. Metered hotspot Wi-Fi
+    val metered = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isNotMetered = false)
+    )
+    assertFalse(metered.isPrivateHomeWifiMet)
+    assertTrue(metered.isIsolationOrPublicDetected)
+    assertTrue(metered.detailedExplanation.contains("Metered", ignoreCase = true))
+
+    // 7. Public / guest / hotel / cafe / corporate SSID keywords
+    val publicSsids = listOf(
+      "MyHome-Guest",
+      "Starbucks WiFi",
+      "Marriott_Hotel",
+      "Airport_Free_WiFi",
+      "eduroam",
+      "xfinitywifi",
+      "Acme-Corp-WiFi"
+    )
+    for (ssid in publicSsids) {
+      val res = WifiIsolationAnalyzer.analyze(
+        basePrivateWifiTelemetry().copy(ssidOrNetworkHint = ssid)
+      )
+      assertFalse("Expected SSID '$ssid' to be flagged as non-private", res.isPrivateHomeWifiMet)
+      assertTrue(res.isIsolationOrPublicDetected)
+    }
+
+    // 8. Non-RFC1918 public IP, CGNAT (100.64.x.x), VM NAT (10.0.2.15), or oversized < /20 subnet
+    val cgnat = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ipv4Address = "100.64.12.8")
+    )
+    assertFalse(cgnat.isPrivateHomeWifiMet)
+    assertTrue(cgnat.isIsolationOrPublicDetected)
+
+    val vmNat = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ipv4Address = "10.0.2.15")
+    )
+    assertFalse(vmNat.isPrivateHomeWifiMet)
+    assertTrue(vmNat.isIsolationOrPublicDetected)
+
+    val hugePublicSubnet = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ipv4Address = "10.12.0.45", ipv4PrefixLength = 16)
+    )
+    assertFalse(hugePublicSubnet.isPrivateHomeWifiMet)
+    assertTrue(hugePublicSubnet.isIsolationOrPublicDetected)
+
+    // 9. Multicast / AP Host Isolation
+    val apIsolated = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(gatewayReachableOrMulticastOk = false)
+    )
+    assertFalse(apIsolated.isPrivateHomeWifiMet)
+    assertTrue(apIsolated.isIsolationOrPublicDetected)
+    assertTrue(apIsolated.detailedExplanation.contains("host isolation", ignoreCase = true))
+
+    // 10. Active VPN
+    val vpnActive = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(isVpnActive = true)
+    )
+    assertFalse(vpnActive.isPrivateHomeWifiMet)
+    assertTrue(vpnActive.detailedExplanation.contains("VPN", ignoreCase = true))
+  }
+
+  @Test
+  fun fuzzVersionComparator_handlesExtremeOverflowNegativeAndRandomStringsSafely() {
+    // 1. >64-bit integer overflow segments must clamp to Long.MAX_VALUE instead of silently dropping
+    assertTrue(
+      VersionComparator.isAtLeast(
+        "999999999999999999999999999999999999.1",
+        "26.37"
+      )
+    )
+
+    // 2. Negative versions must be rejected
+    assertFalse(VersionComparator.isAtLeast("-26.37", "26.37"))
+    assertFalse(VersionComparator.isAtLeast("26.37", "-26.37"))
+
+    // 3. Extremely long input (50,000 chars) must execute rapidly without ReDoS or OOM
+    val hugeVersion = "26.37." + "9".repeat(50_000)
+    assertTrue(VersionComparator.isAtLeast(hugeVersion, "26.37"))
+
+    // 4. Deep dot-separated segments (1,000 segments)
+    val deepDots = (1..1000).joinToString(".") { "1" }
+    assertFalse(VersionComparator.isAtLeast(deepDots, "26.37"))
+
+    // 5. Randomized fuzzing with 1,000 arbitrary Unicode/control/punctuation strings
+    val rng = Random(42)
+    val alphabet = "0123456789.-+eE\u0000\u202E\uFFFF\n\r\t!@#$%^&*()_=[]{}|;:',<>?/\\abcXYZ"
+    repeat(1000) {
+      val len1 = rng.nextInt(0, 300)
+      val len2 = rng.nextInt(0, 300)
+      val s1 = buildString(len1) { repeat(len1) { append(alphabet[rng.nextInt(alphabet.length)]) } }
+      val s2 = buildString(len2) { repeat(len2) { append(alphabet[rng.nextInt(alphabet.length)]) } }
+      // Must never throw any exception
+      VersionComparator.isAtLeast(s1, s2)
+      VersionComparator.extractLeadingVersionParts(s1)
+    }
+  }
+
+  @Test
+  fun fuzzSecurityGuard_boundedStreamAndCompanionJsonParserResistDoSAndInjection() {
+    // 1. Unbounded 100 KB stream without newline must cap at 4,096 bytes and never OOM
+    val hugePayload = ByteArray(100_000) { 'A'.code.toByte() }
+    val bounded = SecurityGuard.readBoundedLine(ByteArrayInputStream(hugePayload), maxBytes = 4096)
+    assertNotNull(bounded)
+    assertEquals(4096, bounded!!.length)
+
+    // 2. Malicious BiDi override (\u202E) and control characters in JSON must be stripped
+    val maliciousJson = """
+      {
+        "phoneModel": "Pixel 10\u202Egnas\u0000\n\r",
+        "buildType": "user\u202E",
+        "androidRelease": "17",
+        "oneUiVersion": "9.0\u0007",
+        "gmsVersionName": "26.38.00",
+        "crossDeviceVersionName": "1.0.1350",
+        "privateWifiConnected": true,
+        "bluetoothEnabled": true
+      }
+    """.trimIndent()
+    val parsed = SecurityGuard.parseAndValidateCompanionJson(maliciousJson)
+    assertNotNull(parsed)
+    assertFalse(parsed!!.phoneModel.contains('\u202E'))
+    assertFalse(parsed.phoneModel.contains('\u0000'))
+    assertEquals("user", parsed.buildType)
+
+    // 3. Fuzz companion JSON parser with 500 random malformed inputs
+    val rng = Random(1337)
+    repeat(500) {
+      val bytes = ByteArray(rng.nextInt(0, 2048))
+      rng.nextBytes(bytes)
+      val randomStr = String(bytes, Charsets.UTF_8)
+      // Must return null or a sanitized snapshot, never throw an unhandled exception
+      val res = SecurityGuard.parseAndValidateCompanionJson(randomStr)
+      if (res != null) {
+        assertTrue(res.phoneModel.length <= 120)
+      }
+    }
+  }
+
+  @Test
+  fun securityGuard_blocksSsrfAndPackageAndUrlInjection() {
+    // 1. SSRF Prevention: only loopback & non-privileged ports allowed
+    assertTrue(SecurityGuard.isAllowedCompanionEndpoint("127.0.0.1", 47232))
+    assertTrue(SecurityGuard.isAllowedCompanionEndpoint("localhost", 47232))
+    assertFalse(SecurityGuard.isAllowedCompanionEndpoint("169.254.169.254", 80))
+    assertFalse(SecurityGuard.isAllowedCompanionEndpoint("192.168.1.1", 47232))
+    assertFalse(SecurityGuard.isAllowedCompanionEndpoint("evil.example.com", 47232))
+    assertFalse(SecurityGuard.isAllowedCompanionEndpoint("127.0.0.1", 22))
+    assertFalse(SecurityGuard.isAllowedCompanionEndpoint("127.0.0.1", 70000))
+
+    val context: Context = ApplicationProvider.getApplicationContext()
+    val ssrfAttemptProvider = SystemDeviceEnvironmentProvider(
+      context = context,
+      companionHostOverride = "169.254.169.254",
+      companionPort = 80
+    )
+    assertNull(ssrfAttemptProvider.probeCompanionPhone())
+
+    // 2. Package Name Validation: blocks URI query/path injection
+    assertTrue(SecurityGuard.isValidAndroidPackageName("com.google.android.gms"))
+    assertTrue(SecurityGuard.isValidAndroidPackageName("com.google.ambient.streaming"))
+    assertFalse(SecurityGuard.isValidAndroidPackageName("com.google.android.gms&referrer=evil"))
+    assertFalse(SecurityGuard.isValidAndroidPackageName("../../etc/passwd"))
+    assertFalse(SecurityGuard.isValidAndroidPackageName("javascript:alert(1)"))
+
+    val launcher = SystemActionLauncher(context)
+    val injectedItem = DependencyCheckItem(
+      id = DependencyId.GMS_APK,
+      stepNumber = 3,
+      title = "GMS",
+      requirementSummary = "",
+      detectedStatus = "",
+      isMet = false,
+      hasUpdateAvailable = true,
+      isChecked = false,
+      whyNotOrFixInstruction = "",
+      phoneRequirementNote = "",
+      actionLabel = "Update Apk",
+      actionType = DependencyActionType.UPDATE_APK,
+      targetPackage = "com.google.android.gms&referrer=utmsource%3Dattacker"
+    )
+    val actionResp = launcher.executeDependencyAction(injectedItem)
+    assertTrue(actionResp.contains("Blocked invalid package identifier"))
+
+    // 3. Trusted HTTPS URL Validation: blocks javascript:, file:, intent:, and non-allowlisted domains
+    assertTrue(
+      SecurityGuard.isTrustedHttpsUrl(
+        "https://support.google.com/googlebook/thread/472325070/update-on-better-together-setup-samsung-galaxy-rollout-on-googlebook?hl=en-GB"
+      )
+    )
+    assertFalse(SecurityGuard.isTrustedHttpsUrl("http://support.google.com/googlebook/thread/472325070"))
+    assertFalse(SecurityGuard.isTrustedHttpsUrl("javascript:alert(document.cookie)"))
+    assertFalse(SecurityGuard.isTrustedHttpsUrl("file:///data/data/com.droid.googlebookfeaturechecker/shared_prefs"))
+    assertFalse(SecurityGuard.isTrustedHttpsUrl("https://attacker.com/support.google.com"))
+    assertFalse(SecurityGuard.isTrustedHttpsUrl("https://user:pass@support.google.com/"))
+
+    val urlResp = launcher.openReferenceSupportThread("javascript:alert(1)")
+    assertTrue(urlResp.contains("Blocked untrusted support URL"))
+
+    // 4. Reject unknown JSON keys, prototype pollution keys, and nested JSON objects/arrays
+    assertNull(
+      SecurityGuard.parseAndValidateCompanionJson(
+        """{"phoneModel":"Pixel","unexpectedKey":"evil"}"""
+      )
+    )
+    assertNull(
+      SecurityGuard.parseAndValidateCompanionJson(
+        """{"phoneModel":{"nested":"object"}}"""
+      )
+    )
+    assertNull(
+      SecurityGuard.parseAndValidateCompanionJson(
+        """{"phoneModel":["array"]}"""
+      )
+    )
+
+    // 5. Exercise all SystemActionLauncher action types safely
+    for (actionType in DependencyActionType.entries) {
+      val item = DependencyCheckItem(
+        id = DependencyId.ANDROID_VERSION,
+        stepNumber = 1,
+        title = "Test",
+        requirementSummary = "",
+        detectedStatus = "",
+        isMet = false,
+        hasUpdateAvailable = false,
+        isChecked = false,
+        whyNotOrFixInstruction = "",
+        phoneRequirementNote = "",
+        actionLabel = "Action",
+        actionType = actionType,
+        targetPackage = "com.google.android.gms"
+      )
+      val res = launcher.executeDependencyAction(item)
+      assertTrue(res.isNotBlank())
+    }
+    val validUrlResp = launcher.openReferenceSupportThread()
+    assertTrue(validUrlResp.isNotBlank())
+  }
+}

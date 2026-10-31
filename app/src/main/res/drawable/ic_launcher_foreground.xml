@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Subtle soft shadow under Googlebook base -->
+    <path
+        android:fillColor="#E2E8F0"
+        android:pathData="M20,69 L68,69 L66,72 L22,72 Z" />
+
+    <!-- Googlebook Laptop Lid / Display Outer Frame (Center-Left) -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M22,36 C22,33.8 23.8,32 26,32 L62,32 C64.2,32 66,33.8 66,36 L66,64 L22,64 Z" />
+
+    <!-- Googlebook Screen Inner Canvas -->
+    <path
+        android:fillColor="#F1F5F9"
+        android:pathData="M25,35.5 L63,35.5 L63,61 L25,61 Z" />
+
+    <!-- Googlebook Top 4-Color Accent Bar inside screen -->
+    <path
+        android:fillColor="#4285F4"
+        android:pathData="M25,35.5 L34.5,35.5 L34.5,37.5 L25,37.5 Z" />
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M34.5,35.5 L44,35.5 L44,37.5 L34.5,37.5 Z" />
+    <path
+        android:fillColor="#FBBC05"
+        android:pathData="M44,35.5 L53.5,35.5 L53.5,37.5 L44,37.5 Z" />
+    <path
+        android:fillColor="#34A853"
+        android:pathData="M53.5,35.5 L63,35.5 L63,37.5 L53.5,37.5 Z" />
+
+    <!-- Googlebook Screen Content: Calm teal window card -->
+    <path
+        android:fillColor="#CCE8E6"
+        android:pathData="M29,41 L57,41 C58.1,41 59,41.9 59,43 L59,56 C59,57.1 58.1,58 57,58 L29,58 C27.9,58 27,57.1 27,56 L27,43 C27,41.9 27.9,41 29,41 Z" />
+    <path
+        android:strokeColor="#00696B"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M39,49.5 L42.5,53 L49,46" />
+
+    <!-- Googlebook Aluminum Keyboard Base / Deck -->
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M17,64 L71,64 L68.5,69.5 L19.5,69.5 Z" />
+    <!-- Googlebook Trackpad Notch -->
+    <path
+        android:fillColor="#64748B"
+        android:pathData="M39,64 L49,64 L48.2,66 L39.8,66 Z" />
+
+    <!-- Tap / Contact Ripple Arcs at the right edge of the Googlebook where the Pixel taps -->
+    <path
+        android:strokeColor="#00696B"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M64.5,45.5 Q61,50 64.5,54.5" />
+    <path
+        android:strokeColor="#4285F4"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M62,43 Q57.5,50 62,57" />
+
+    <!-- Pixel Phone Tilted (-18 degrees) Tapping Against the Right Side of the Googlebook -->
+    <group
+        android:pivotX="75"
+        android:pivotY="54"
+        android:rotation="-18">
+        <!-- Pixel Phone Body (Obsidian/Porcelain Bezel) -->
+        <path
+            android:fillColor="#1E293B"
+            android:pathData="M67,35 C67,32.5 69,30.5 71.5,30.5 L83.5,30.5 C86,30.5 88,32.5 88,35 L88,71 C88,73.5 86,75.5 83.5,75.5 L71.5,75.5 C69,75.5 67,73.5 67,71 Z" />
+        <!-- Pixel Screen / Back Glass -->
+        <path
+            android:fillColor="#E2F1EF"
+            android:pathData="M69.2,33 L85.8,33 L85.8,73 L69.2,73 Z" />
+        <!-- Iconic Pixel Camera Bar / Visor across upper phone -->
+        <path
+            android:fillColor="#0F172A"
+            android:pathData="M67,38.5 L88,38.5 L88,44.5 L67,44.5 Z" />
+        <!-- Pixel Camera Pill & Lens inside Visor -->
+        <path
+            android:fillColor="#64748B"
+            android:pathData="M71,40.3 L78.5,40.3 C79.4,40.3 80.2,40.9 80.2,41.5 C80.2,42.1 79.4,42.7 78.5,42.7 L71,42.7 C70.1,42.7 69.3,42.1 69.3,41.5 C69.3,40.9 70.1,40.3 71,40.3 Z" />
+        <path
+            android:fillColor="#94A3B8"
+            android:pathData="M83,41.5m-1.3,0a1.3,1.3 0,1 1,2.6 0a1.3,1.3 0,1 1,-2.6 0" />
+        <!-- Subtle G / Sync Badge on Pixel -->
+        <path
+            android:fillColor="#00696B"
+            android:pathData="M77.5,56.5m-4.2,0a4.2,4.2 0,1 1,8.4 0a4.2,4.2 0,1 1,-8.4 0" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M75.5,56.5 L77,58 L79.8,55" />
+    </group>
+</vector>
