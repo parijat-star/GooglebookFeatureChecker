@@ -72,7 +72,7 @@ class FeatureCheckerViewModel(
       isLocalBuildTypeValid = buildValid,
       dependencies = dependencies,
       focusedDependencyIndex = 0,
-      phoneReportState = evaluatePhoneReportState(companion, snapshot.buildType),
+      phoneReportState = evaluatePhoneReportState(companion, snapshot),
       lastCheckedTimestampText = "just now"
     )
   }
@@ -94,7 +94,7 @@ class FeatureCheckerViewModel(
         localBuildType = snapshot.buildType,
         isLocalBuildTypeValid = buildValid,
         dependencies = dependencies,
-        phoneReportState = evaluatePhoneReportState(companion, snapshot.buildType),
+        phoneReportState = evaluatePhoneReportState(companion, snapshot),
         lastCheckedTimestampText = "just now",
         statusBannerMessage = "Refreshed all 7 dependency checks."
       )
@@ -464,11 +464,36 @@ class FeatureCheckerViewModel(
     )
   }
 
+  private fun resolveConnectedWifiLabel(snapshot: DeviceSystemSnapshot): String {
+    val extractedQuotedSsid = Regex("\"([^\"]+)\"").find(snapshot.networkSsidOrDescription)?.groupValues?.getOrNull(1)
+    val extractedParenSsid = Regex("\\(([^)]+)\\)").find(snapshot.networkSsidOrDescription)?.groupValues?.getOrNull(1)
+    return snapshot.connectedWifiName?.takeIf {
+      it.isNotBlank() && !it.equals("Not connected", ignoreCase = true)
+    } ?: extractedQuotedSsid
+      ?: extractedParenSsid
+      ?: if (snapshot.wifiConnected && snapshot.networkSsidOrDescription.isNotBlank()) {
+        snapshot.networkSsidOrDescription
+          .substringBefore(" · ")
+          .removePrefix("Connected to Wi-Fi:")
+          .trim()
+          .removeSurrounding("\"")
+      } else {
+        "Not connected"
+      }
+  }
+
   private fun evaluatePhoneReportState(
     companion: CompanionPhoneSnapshot?,
-    localBuildType: String
+    snapshot: DeviceSystemSnapshot
   ): PhoneReportState {
+    val localBuildType = snapshot.buildType
     val expectedPairLabel = if (normalizeBuildType(localBuildType) == "user") "user" else "userdbg"
+    val connectedWifiLabel = resolveConnectedWifiLabel(snapshot)
+    val networkRequirementLine = if (snapshot.wifiConnected && connectedWifiLabel != "Not connected") {
+      "Network: Same private Wi-Fi (\"$connectedWifiLabel\"), No VPN & Bluetooth ON"
+    } else {
+      "Network: Same private Wi-Fi, No VPN & Bluetooth ON"
+    }
     if (companion == null) {
       return PhoneReportState.Unreachable(
         reason = "Android isolates cross-device package and system build inspection unless a companion responder is active on your phone.",
@@ -478,7 +503,7 @@ class FeatureCheckerViewModel(
           "OS version: Android 17 (One UI 9.0 on Samsung Galaxy phones)",
           "Google Play services APK: v26.37 or newer",
           "Cross-device services APK: v1.0.1346 or newer",
-          "Network: Same private home Wi-Fi (VPN paused) & Bluetooth on",
+          networkRequirementLine,
           "Continue activity: Tasks, Apps, Notifications, and Files & media sharing on, then restart both devices",
           "Matching build type: Must match this device ('$expectedPairLabel' — if Googlebook is 'user', phone must be 'user'; if Googlebook is 'userdbg', phone must be 'userdbg' too; most production phone builds are 'user')"
         )

@@ -5,7 +5,6 @@ import android.content.Context
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
-import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -23,7 +22,6 @@ import com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel
 import com.droid.googlebookfeaturechecker.ui.theme.GooglebookFeatureCheckerTheme
 import com.droid.googlebookfeaturechecker.util.SystemActionLauncher
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -129,21 +127,22 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("action_button_PRIVATE_WIFI").assertIsDisplayed()
     composeTestRule.onNodeWithText("Wifi Not Supported").assertIsDisplayed()
 
-    // Scroll to BUILD_TYPE at the end of the checklist (step #7) -> shows green Met badge, no action or update button
+    // Scroll to BUILD_TYPE at the end of the checklist (step #7) -> listed as a dependency with NO click-mark and NO Met badge
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("dependency_card_BUILD_TYPE"))
     composeTestRule.onNodeWithTag("dependency_card_BUILD_TYPE").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("met_badge_BUILD_TYPE", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("met_badge_BUILD_TYPE", useUnmergedTree = true).assertDoesNotExist()
+    composeTestRule.onNodeWithTag("click_mark_BUILD_TYPE").assertDoesNotExist()
     composeTestRule.onNodeWithTag("action_button_BUILD_TYPE").assertDoesNotExist()
     composeTestRule.onNodeWithTag("update_available_button_BUILD_TYPE").assertDoesNotExist()
-    composeTestRule.onNodeWithTag("click_mark_BUILD_TYPE").assertIsOn()
-    composeTestRule.onNodeWithTag("click_mark_BUILD_TYPE").performClick()
-    assertFalse(viewModel.uiState.value.dependencies.first { it.id == DependencyId.BUILD_TYPE }.isChecked)
 
-    // Scroll to Companion Phone section and Google Feedback section
+    // Scroll to Companion Phone section -> verify "Check phone" button is removed, "What your phone also needs" highlight card is shown with connected Wi-Fi name
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("companion_phone_section"))
     composeTestRule.onNodeWithTag("companion_phone_section").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("rescan_phone_button").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("phone_needs_highlight_card").assertIsDisplayed()
+    composeTestRule.onNodeWithText("• Network: Same private Wi-Fi (\"Home_5G\"), No VPN & Bluetooth ON").assertIsDisplayed()
 
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("google_feedback_card"))
@@ -201,10 +200,11 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("update_available_button_CROSS_DEVICE_APK").assertDoesNotExist()
     composeTestRule.onNodeWithTag("action_button_CROSS_DEVICE_APK").assertDoesNotExist()
 
-    // Scroll to BUILD_TYPE (#7 at bottom of checklist) on phone
+    // Scroll to BUILD_TYPE (#7 at bottom of checklist) on phone -> displayed as dependency with no click-mark or Met badge
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("dependency_card_BUILD_TYPE"))
     composeTestRule.onNodeWithTag("dependency_card_BUILD_TYPE").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("met_badge_BUILD_TYPE", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("met_badge_BUILD_TYPE", useUnmergedTree = true).assertDoesNotExist()
+    composeTestRule.onNodeWithTag("click_mark_BUILD_TYPE").assertDoesNotExist()
   }
 }

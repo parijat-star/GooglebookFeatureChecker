@@ -14,8 +14,8 @@ android {
     applicationId = "com.droid.googlebookfeaturechecker"
     minSdk = 26
     targetSdk = 36
-    versionCode = 7
-    versionName = "1.5.1"
+    versionCode = 11
+    versionName = "1.5.3"
   }
 
   buildTypes {

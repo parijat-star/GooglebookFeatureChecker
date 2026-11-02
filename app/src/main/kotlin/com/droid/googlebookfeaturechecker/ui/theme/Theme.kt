@@ -10,8 +10,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.DeviceFontFamilyName
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import com.droid.googlebookfeaturechecker.model.ThemeMode
 
 /**
@@ -108,18 +112,84 @@ val LocalStudioColors = staticCompositionLocalOf {
   )
 }
 
+/**
+ * Googlebook / Wayfinder system font families ("google-sans" and "google-sans-text")
+ * with automatic fallback to standard sans-serif when running in unit tests or non-Googlebook devices.
+ */
+private val GoogleSansFamily = FontFamily(
+  Font(DeviceFontFamilyName("google-sans"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("google-sans"), FontWeight.Medium),
+  Font(DeviceFontFamilyName("google-sans-text"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("google-sans-text"), FontWeight.Medium),
+  Font(DeviceFontFamilyName("sans-serif"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("sans-serif-medium"), FontWeight.Medium)
+)
+
+private val GoogleSansTextFamily = FontFamily(
+  Font(DeviceFontFamilyName("google-sans-text"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("google-sans-text"), FontWeight.Medium),
+  Font(DeviceFontFamilyName("google-sans"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("google-sans"), FontWeight.Medium),
+  Font(DeviceFontFamilyName("sans-serif"), FontWeight.Normal),
+  Font(DeviceFontFamilyName("sans-serif-medium"), FontWeight.Medium)
+)
+
 private fun studioTypography(): Typography {
-  val b = Typography()
-  return b.copy(
-    headlineSmall = b.headlineSmall.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(700)),
-    titleLarge = b.titleLarge.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(680)),
-    titleMedium = b.titleMedium.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(620)),
-    titleSmall = b.titleSmall.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(650)),
-    bodyLarge = b.bodyLarge.copy(fontFamily = FontFamily.SansSerif),
-    bodyMedium = b.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
-    bodySmall = b.bodySmall.copy(fontFamily = FontFamily.SansSerif),
-    labelLarge = b.labelLarge.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(620)),
-    labelMedium = b.labelMedium.copy(fontFamily = FontFamily.SansSerif, fontWeight = FontWeight(600))
+  return Typography(
+    headlineSmall = TextStyle(
+      fontFamily = GoogleSansFamily,
+      fontSize = 22.sp,
+      lineHeight = 28.sp,
+      fontWeight = FontWeight.Normal
+    ),
+    titleLarge = TextStyle(
+      fontFamily = GoogleSansFamily,
+      fontSize = 20.sp,
+      lineHeight = 26.sp,
+      fontWeight = FontWeight.Normal
+    ),
+    titleMedium = TextStyle(
+      fontFamily = GoogleSansFamily,
+      fontSize = 16.sp,
+      lineHeight = 22.sp,
+      fontWeight = FontWeight.Medium
+    ),
+    titleSmall = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 14.sp,
+      lineHeight = 20.sp,
+      fontWeight = FontWeight.Medium
+    ),
+    bodyLarge = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 14.sp,
+      lineHeight = 20.sp,
+      fontWeight = FontWeight.Normal
+    ),
+    bodyMedium = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
+      fontWeight = FontWeight.Normal
+    ),
+    bodySmall = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 12.sp,
+      lineHeight = 16.sp,
+      fontWeight = FontWeight.Normal
+    ),
+    labelLarge = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
+      fontWeight = FontWeight.Medium
+    ),
+    labelMedium = TextStyle(
+      fontFamily = GoogleSansTextFamily,
+      fontSize = 12.sp,
+      lineHeight = 16.sp,
+      fontWeight = FontWeight.Medium
+    )
   )
 }
 

@@ -360,7 +360,6 @@ fun FeatureCheckerScreen(
                 onToggleCheckMark = onToggleCheckMark,
                 onFocusDependency = onFocusDependency,
                 onExecuteAction = onExecuteAction,
-                onRefreshChecks = onRefreshChecks,
                 onSendFeedbackReport = onSendFeedbackReport,
                 onOpenReferenceThread = onOpenReferenceThread
               )
@@ -376,7 +375,6 @@ fun FeatureCheckerScreen(
             onToggleCheckMark = onToggleCheckMark,
             onFocusDependency = onFocusDependency,
             onExecuteAction = onExecuteAction,
-            onRefreshChecks = onRefreshChecks,
             onSendFeedbackReport = onSendFeedbackReport,
             onOpenReferenceThread = onOpenReferenceThread
           )
@@ -595,7 +593,7 @@ private fun StudioDeviceOverviewPane(
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text(
             text = title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight(580)),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface
           )
           if (sub != null) {
@@ -624,7 +622,7 @@ private fun StudioDeviceOverviewPane(
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = "Rollout & setup guide",
-          style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight(580)),
+          style = MaterialTheme.typography.bodyLarge,
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
@@ -841,7 +839,6 @@ private fun StudioDependenciesColumn(
   onToggleCheckMark: (DependencyId) -> Unit,
   onFocusDependency: (Int) -> Unit,
   onExecuteAction: (DependencyCheckItem) -> Unit,
-  onRefreshChecks: () -> Unit,
   onSendFeedbackReport: () -> Unit,
   onOpenReferenceThread: () -> Unit
 ) {
@@ -908,8 +905,7 @@ private fun StudioDependenciesColumn(
     // Group 2: Companion Phone Dependency Check / Tip
     item {
       CompanionPhoneGroup(
-        phoneReportState = uiState.phoneReportState,
-        onRefreshCompanionScan = onRefreshChecks
+        phoneReportState = uiState.phoneReportState
       )
     }
 
@@ -937,6 +933,7 @@ private fun DependencySettingRow(
   val studio = LocalStudioColors.current
   val interactionSource = remember { MutableInteractionSource() }
   val isHovered by interactionSource.collectIsHoveredAsState()
+  val isBuildTypeRow = item.id == DependencyId.BUILD_TYPE
 
   val bgColor = when {
     isFocused || isHovered -> MaterialTheme.colorScheme.surfaceContainerLow
@@ -950,7 +947,13 @@ private fun DependencySettingRow(
       .background(bgColor)
       .hoverable(interactionSource)
       .focusable()
-      .clickable { onToggleCheckMark() }
+      .clickable {
+        if (isBuildTypeRow) {
+          onFocus()
+        } else {
+          onToggleCheckMark()
+        }
+      }
       .padding(horizontal = if (isCompactPhone) 14.dp else 20.dp, vertical = 14.dp)
       .testTag("dependency_card_${item.id.name}"),
     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -960,21 +963,23 @@ private fun DependencySettingRow(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(if (isCompactPhone) 10.dp else 14.dp)
     ) {
-      // Click-mark Checkbox on each dependency (Green Met checkmark box)
-      Checkbox(
-        checked = item.isChecked,
-        onCheckedChange = { onToggleCheckMark() },
-        colors = CheckboxDefaults.colors(
-          checkedColor = studio.metGreen,
-          checkmarkColor = studio.onMetGreen,
-          uncheckedColor = MaterialTheme.colorScheme.outline
-        ),
-        modifier = Modifier
-          .testTag("click_mark_${item.id.name}")
-          .semantics {
-            contentDescription = "Click-mark for ${item.title}"
-          }
-      )
+      // Click-mark Checkbox on confirmable dependencies (omitted on #7 Matching device build type since phone type cannot be confirmed locally)
+      if (!isBuildTypeRow) {
+        Checkbox(
+          checked = item.isChecked,
+          onCheckedChange = { onToggleCheckMark() },
+          colors = CheckboxDefaults.colors(
+            checkedColor = studio.metGreen,
+            checkmarkColor = studio.onMetGreen,
+            uncheckedColor = MaterialTheme.colorScheme.outline
+          ),
+          modifier = Modifier
+            .testTag("click_mark_${item.id.name}")
+            .semantics {
+              contentDescription = "Click-mark for ${item.title}"
+            }
+        )
+      }
 
       Column(
         modifier = Modifier.weight(1f),
@@ -982,7 +987,7 @@ private fun DependencySettingRow(
       ) {
         Text(
           text = "${item.stepNumber}. ${item.title}",
-          style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight(580)),
+          style = MaterialTheme.typography.bodyLarge,
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
@@ -996,82 +1001,84 @@ private fun DependencySettingRow(
         )
       }
 
-      // Status & Action Column:
-      // - When !item.isMet: show primary action button ("Update Apk", "Fix Wi-Fi", etc.)
+      // Status & Action Column (omitted on #7 Matching device build type since phone type cannot be confirmed locally):
+      // - When !item.isMet: show primary action button ("Update Apk", "Wifi Not Supported", etc.)
       // - When item.isMet: show green "✓ Met" box, AND if item.hasUpdateAvailable is true,
       //   show an "Update Available" button directly underneath "Met".
-      if (!item.isMet) {
-        if (!isCompactPhone) {
-          Button(
-            onClick = {
-              onFocus()
-              onExecuteAction()
-            },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              contentColor = MaterialTheme.colorScheme.onPrimary
-            ),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            modifier = Modifier.testTag("action_button_${item.id.name}")
-          ) {
-            Text(
-              text = item.actionLabel,
-              style = MaterialTheme.typography.labelMedium
-            )
-          }
-        }
-      } else {
-        Column(
-          horizontalAlignment = Alignment.End,
-          verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          // Green Met checkmark box
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(10.dp))
-              .background(studio.metGreenContainer)
-              .padding(horizontal = 12.dp, vertical = 6.dp)
-              .testTag("met_badge_${item.id.name}")
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-              Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = null,
-                tint = studio.onMetGreenContainer,
-                modifier = Modifier.size(15.dp)
-              )
-              Text(
-                text = "Met",
-                style = MaterialTheme.typography.labelMedium,
-                color = studio.onMetGreenContainer
-              )
-            }
-          }
-
-          // Requirement 2: If an update is available, add a button under Met saying "Update Available"
-          // even if the condition is met. If no update is available, leave Met as is.
-          if (item.hasUpdateAvailable) {
+      if (!isBuildTypeRow) {
+        if (!item.isMet) {
+          if (!isCompactPhone) {
             Button(
               onClick = {
                 onFocus()
                 onExecuteAction()
               },
-              shape = RoundedCornerShape(12.dp),
+              shape = RoundedCornerShape(16.dp),
               colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
               ),
-              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-              modifier = Modifier.testTag("update_available_button_${item.id.name}")
+              contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+              modifier = Modifier.testTag("action_button_${item.id.name}")
             ) {
               Text(
-                text = "Update Available",
+                text = item.actionLabel,
                 style = MaterialTheme.typography.labelMedium
               )
+            }
+          }
+        } else {
+          Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            // Green Met checkmark box
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(studio.metGreenContainer)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .testTag("met_badge_${item.id.name}")
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Check,
+                  contentDescription = null,
+                  tint = studio.onMetGreenContainer,
+                  modifier = Modifier.size(15.dp)
+                )
+                Text(
+                  text = "Met",
+                  style = MaterialTheme.typography.labelMedium,
+                  color = studio.onMetGreenContainer
+                )
+              }
+            }
+
+            // Requirement 2: If an update is available, add a button under Met saying "Update Available"
+            // even if the condition is met. If no update is available, leave Met as is.
+            if (item.hasUpdateAvailable) {
+              Button(
+                onClick = {
+                  onFocus()
+                  onExecuteAction()
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                  contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.testTag("update_available_button_${item.id.name}")
+              ) {
+                Text(
+                  text = "Update Available",
+                  style = MaterialTheme.typography.labelMedium
+                )
+              }
             }
           }
         }
@@ -1080,10 +1087,16 @@ private fun DependencySettingRow(
 
     // Explanation when not met, plus callout for phone requirement (and full-width/aligned action button on compact phone)
     Column(
-      modifier = Modifier.padding(start = if (isCompactPhone) 40.dp else 48.dp),
+      modifier = Modifier.padding(
+        start = when {
+          isBuildTypeRow -> 0.dp
+          isCompactPhone -> 40.dp
+          else -> 48.dp
+        }
+      ),
       verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-      if (!item.isMet) {
+      if (!item.isMet && !isBuildTypeRow) {
         Text(
           text = item.whyNotOrFixInstruction,
           style = MaterialTheme.typography.bodySmall,
@@ -1121,8 +1134,7 @@ private fun DependencySettingRow(
 
 @Composable
 private fun CompanionPhoneGroup(
-  phoneReportState: PhoneReportState,
-  onRefreshCompanionScan: () -> Unit
+  phoneReportState: PhoneReportState
 ) {
   val studio = LocalStudioColors.current
   Column(
@@ -1163,7 +1175,7 @@ private fun CompanionPhoneGroup(
               Column {
                 Text(
                   text = phoneReportState.snapshot.phoneModel,
-                  style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight(580)),
+                  style = MaterialTheme.typography.bodyLarge,
                   color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
@@ -1172,20 +1184,6 @@ private fun CompanionPhoneGroup(
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
               }
-            }
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.secondaryContainer)
-                .clickable(onClick = onRefreshCompanionScan)
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-                .testTag("rescan_phone_button")
-            ) {
-              Text(
-                text = "Refresh phone",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-              )
             }
           }
 
@@ -1201,7 +1199,7 @@ private fun CompanionPhoneGroup(
             ) {
               Text(
                 text = phoneItem.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight(560)),
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface
               )
               Text(
@@ -1220,7 +1218,7 @@ private fun CompanionPhoneGroup(
 
       is PhoneReportState.Unreachable -> {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-          // Row 1: Tip to run the same app on the phone
+          // Row 1: Tip to run the same app on the phone (no "Check phone" button)
           Row(
             modifier = Modifier
               .fillMaxWidth()
@@ -1242,7 +1240,7 @@ private fun CompanionPhoneGroup(
             ) {
               Text(
                 text = phoneReportState.tipTitle,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight(580)),
+                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
               )
               Text(
@@ -1251,41 +1249,28 @@ private fun CompanionPhoneGroup(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
               )
             }
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.secondaryContainer)
-                .clickable(onClick = onRefreshCompanionScan)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .testTag("rescan_phone_button")
-            ) {
-              Text(
-                text = "Check phone",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-              )
-            }
           }
 
-          // Row 2: Compact checklist of what the phone needs
+          // Row 2: Highlighted with a light green background so "What your phone also needs" pops out
           Column(
             modifier = Modifier
               .fillMaxWidth()
               .clip(groupShape(1, 2))
-              .background(studio.card)
-              .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+              .background(studio.metGreenContainer)
+              .padding(horizontal = 20.dp, vertical = 14.dp)
+              .testTag("phone_needs_highlight_card"),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
           ) {
             Text(
               text = "What your phone also needs",
-              style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight(580)),
-              color = MaterialTheme.colorScheme.onSurface
+              style = MaterialTheme.typography.titleSmall,
+              color = studio.onMetGreenContainer
             )
             phoneReportState.phoneRequirementsChecklist.forEach { req ->
               Text(
                 text = "• $req",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = studio.onMetGreenContainer
               )
             }
           }
@@ -1334,7 +1319,7 @@ private fun TroubleshootingFeedbackGroup(
         ) {
           Text(
             text = "Send a bug to Google using feedback report",
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight(580)),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface
           )
           Text(
@@ -1376,7 +1361,7 @@ private fun TroubleshootingFeedbackGroup(
         ) {
           Text(
             text = "Update on Better Together setup & Samsung Galaxy rollout",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight(560)),
+            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface
           )
           Text(
