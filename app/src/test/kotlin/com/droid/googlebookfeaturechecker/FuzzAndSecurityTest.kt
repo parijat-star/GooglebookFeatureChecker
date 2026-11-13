@@ -101,20 +101,21 @@ class FuzzAndSecurityTest {
     assertFalse(ephemeral.isPrivateHomeWifiMet)
     assertTrue(ephemeral.isIsolationOrPublicDetected)
 
-    // 6. Metered hotspot Wi-Fi
+    // 6. Metered Wi-Fi emits a non-blocking warning instead of falsely failing private home Wi-Fi
     val metered = WifiIsolationAnalyzer.analyze(
       basePrivateWifiTelemetry().copy(isNotMetered = false)
     )
-    assertFalse(metered.isPrivateHomeWifiMet)
-    assertTrue(metered.isIsolationOrPublicDetected)
-    assertTrue(metered.detailedExplanation.contains("Metered", ignoreCase = true))
+    assertTrue(metered.isPrivateHomeWifiMet)
+    assertFalse(metered.isIsolationOrPublicDetected)
+    assertTrue(metered.warnings.any { it.contains("metered", ignoreCase = true) })
 
-    // 7. Public / guest / hotel / cafe / corporate SSID keywords
+    // 7. Public / guest / hotel / cafe / corporate SSID tokens MUST block, while benign substrings MUST NOT
     val publicSsids = listOf(
       "MyHome-Guest",
       "Starbucks WiFi",
       "Marriott_Hotel",
       "Airport_Free_WiFi",
+      "CoffeeGuest",
       "eduroam",
       "xfinitywifi",
       "Acme-Corp-WiFi"
@@ -127,12 +128,27 @@ class FuzzAndSecurityTest {
       assertTrue(res.isIsolationOrPublicDetected)
     }
 
-    // 8. Non-RFC1918 public IP, CGNAT (100.64.x.x), VM NAT (10.0.2.15), or oversized < /20 subnet
+    val benignSsids = listOf("Freeman_Home", "Carefree_5G", "Corporal_LAN", "FreeportMesh")
+    for (ssid in benignSsids) {
+      val res = WifiIsolationAnalyzer.analyze(
+        basePrivateWifiTelemetry().copy(ssidOrNetworkHint = ssid)
+      )
+      assertTrue("Expected benign SSID '$ssid' not to false-positive", res.isPrivateHomeWifiMet)
+      assertFalse(res.isIsolationOrPublicDetected)
+    }
+
+    // 8. CGNAT (100.64.x.x) & < /20 private LAN emit warnings; VM NAT (10.0.2.15) & public IPs block
     val cgnat = WifiIsolationAnalyzer.analyze(
       basePrivateWifiTelemetry().copy(ipv4Address = "100.64.12.8")
     )
-    assertFalse(cgnat.isPrivateHomeWifiMet)
-    assertTrue(cgnat.isIsolationOrPublicDetected)
+    assertTrue(cgnat.isPrivateHomeWifiMet)
+    assertTrue(cgnat.warnings.any { it.contains("NAT", ignoreCase = true) })
+
+    val publicIp = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ipv4Address = "8.8.8.8")
+    )
+    assertFalse(publicIp.isPrivateHomeWifiMet)
+    assertTrue(publicIp.isIsolationOrPublicDetected)
 
     val vmNat = WifiIsolationAnalyzer.analyze(
       basePrivateWifiTelemetry().copy(ipv4Address = "10.0.2.15")
@@ -140,11 +156,19 @@ class FuzzAndSecurityTest {
     assertFalse(vmNat.isPrivateHomeWifiMet)
     assertTrue(vmNat.isIsolationOrPublicDetected)
 
-    val hugePublicSubnet = WifiIsolationAnalyzer.analyze(
+    val hugePrivateSubnet = WifiIsolationAnalyzer.analyze(
       basePrivateWifiTelemetry().copy(ipv4Address = "10.12.0.45", ipv4PrefixLength = 16)
     )
-    assertFalse(hugePublicSubnet.isPrivateHomeWifiMet)
-    assertTrue(hugePublicSubnet.isIsolationOrPublicDetected)
+    assertTrue(hugePrivateSubnet.isPrivateHomeWifiMet)
+    assertTrue(hugePrivateSubnet.warnings.any { it.contains("/16") })
+
+    // 9. Unverified single-device AP isolation adds advisory warning; confirmed isolation fails
+    val unverifiedIsolation = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(apIsolationVerified = false)
+    )
+    assertTrue(unverifiedIsolation.isPrivateHomeWifiMet)
+    assertTrue(unverifiedIsolation.requiresPeerIsolationVerification)
+    assertTrue(unverifiedIsolation.warnings.any { it.contains("isolation", ignoreCase = true) })
 
     // 9. Multicast / AP Host Isolation
     val apIsolated = WifiIsolationAnalyzer.analyze(
@@ -160,6 +184,42 @@ class FuzzAndSecurityTest {
     )
     assertFalse(vpnActive.isPrivateHomeWifiMet)
     assertTrue(vpnActive.detailedExplanation.contains("VPN", ignoreCase = true))
+
+    // 11. Wired Ethernet only must not show Wi-Fi Location-permission prompt
+    val ethernetOnly = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(
+        hasWifiTransport = false,
+        hasEthernetTransport = true,
+        ssidOrNetworkHint = null,
+        hasLocationPermission = true
+      )
+    )
+    assertTrue(ethernetOnly.isPrivateHomeWifiMet)
+    assertTrue(ethernetOnly.isEthernetOnly)
+    assertFalse(ethernetOnly.connectedWifiName.contains("Location", ignoreCase = true))
+    assertEquals("Ethernet LAN", ethernetOnly.connectedWifiName)
+
+    // 12. Hidden SSID when Location IS already granted must not ask for Location permission
+    val hiddenWithPermission = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ssidOrNetworkHint = "<unknown ssid>", hasLocationPermission = true)
+    )
+    assertTrue(hiddenWithPermission.isPrivateHomeWifiMet)
+    assertFalse(hiddenWithPermission.isKnownSsid)
+    assertFalse(hiddenWithPermission.connectedWifiName.contains("grant Location", ignoreCase = true))
+
+    // 13. APIPA Link-Local (169.254.x.x) DHCP failure is flagged clearly
+    val apipa = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(ipv4Address = "169.254.44.10", ipv4PrefixLength = 16)
+    )
+    assertFalse(apipa.isPrivateHomeWifiMet)
+    assertTrue(apipa.detailedExplanation.contains("DHCP", ignoreCase = true))
+
+    // 14. Gateway ping timeout adds advisory warning without false-failing private home Wi-Fi
+    val pingTimeout = WifiIsolationAnalyzer.analyze(
+      basePrivateWifiTelemetry().copy(gatewayPingTimedOut = true)
+    )
+    assertTrue(pingTimeout.isPrivateHomeWifiMet)
+    assertTrue(pingTimeout.warnings.any { it.contains("did not respond to ping", ignoreCase = true) })
   }
 
   @Test

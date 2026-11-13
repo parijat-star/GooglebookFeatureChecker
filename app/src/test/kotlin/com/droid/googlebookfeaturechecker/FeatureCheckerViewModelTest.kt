@@ -3,12 +3,18 @@ package com.droid.googlebookfeaturechecker
 import com.droid.googlebookfeaturechecker.data.CompanionPhoneSnapshot
 import com.droid.googlebookfeaturechecker.data.DeviceEnvironmentProvider
 import com.droid.googlebookfeaturechecker.data.DeviceSystemSnapshot
+import com.droid.googlebookfeaturechecker.model.CheckStatus
 import com.droid.googlebookfeaturechecker.model.DependencyActionType
 import com.droid.googlebookfeaturechecker.model.DependencyId
 import com.droid.googlebookfeaturechecker.model.PhoneReportState
 import com.droid.googlebookfeaturechecker.model.ThemeMode
 import com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel
 import com.droid.googlebookfeaturechecker.util.VersionComparator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -90,7 +96,7 @@ class FeatureCheckerViewModelTest {
     val wifiDep = state.dependencies.first { it.id == DependencyId.PRIVATE_WIFI }
     assertTrue(wifiDep.detectedStatus.contains("Home_5G"))
     assertTrue(wifiDep.phoneRequirementNote.contains("Phone should be connected to \"Home_5G\" Wi-Fi"))
-    assertEquals("Wifi Not Supported", wifiDep.actionLabel)
+    assertEquals("Fix Wi-Fi", wifiDep.actionLabel)
   }
 
   @Test
@@ -237,7 +243,7 @@ class FeatureCheckerViewModelTest {
 
     assertFalse(wifiDep.isMet)
     assertTrue(wifiDep.shouldShowActionButton)
-    assertEquals("Wifi Not Supported", wifiDep.actionLabel)
+    assertEquals("Pause VPN", wifiDep.actionLabel)
     assertTrue(wifiDep.detectedStatus.contains("Airport_Free_WiFi"))
     assertTrue(wifiDep.phoneRequirementNote.contains("Phone should be connected to \"Airport_Free_WiFi\" Wi-Fi"))
     assertFalse(wifiDep.isChecked)
@@ -275,9 +281,10 @@ class FeatureCheckerViewModelTest {
 
     val unreachableState = viewModel.uiState.value.phoneReportState
     assertTrue(unreachableState is PhoneReportState.Unreachable)
-    val tipText = (unreachableState as PhoneReportState.Unreachable).tipMessage
-    assertTrue(tipText.contains("phone", ignoreCase = true))
-    assertTrue(tipText.contains("Googlebook Feature Checker", ignoreCase = true))
+    val unreachable = unreachableState as PhoneReportState.Unreachable
+    assertTrue(unreachable.tipTitle.contains("other device", ignoreCase = true))
+    assertTrue(unreachable.tipMessage.contains("other device", ignoreCase = true))
+    assertTrue(unreachable.tipMessage.contains("Googlebook Feature Checker", ignoreCase = true))
 
     // Local snapshot in FakeDeviceEnvironmentProvider is "userdebug" -> phone with "userdbg" matches!
     provider.companionSnapshot = CompanionPhoneSnapshot(
@@ -316,5 +323,62 @@ class FeatureCheckerViewModelTest {
     assertTrue(report.contains("Googlebook Better Together"))
     assertTrue(report.contains("userdebug"))
     assertTrue(report.contains("support.google.com/googlebook/thread/472325070"))
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun gapFixes_advisoryCheck6_permissionPrompts_andAsyncRefreshBehaveAccurately() = runTest {
+    Dispatchers.setMain(Dispatchers.Unconfined)
+    try {
+      // GAP-01, GAP-04, GAP-09: Unverifiable Continue activity, missing BT permission, missing Location permission
+      val provider = FakeDeviceEnvironmentProvider(
+        snapshot = FakeDeviceEnvironmentProvider().snapshot.copy(
+          hasLocationPermission = false,
+          bluetoothPermissionGranted = false,
+          bluetoothEnabled = false,
+          hasGoogleAccountSignedIn = false,
+          continueActivityConfigured = false,
+          crossDeviceSettingsResolvable = true,
+          continueActivityVerifiedBySystem = false,
+          wifiWarnings = listOf("Network is marked as metered")
+        )
+      )
+      val vm = FeatureCheckerViewModel(provider, ioDispatcher = Dispatchers.Unconfined, loadSynchronously = false)
+      val state = vm.uiState.value
+
+      val wifiDep = state.dependencies.first { it.id == DependencyId.PRIVATE_WIFI }
+      assertFalse(wifiDep.isMet)
+      assertEquals(CheckStatus.PERMISSION_REQUIRED, wifiDep.status)
+      assertTrue(wifiDep.hasUpdateAvailable)
+      assertEquals("Grant Location", wifiDep.actionLabel)
+      assertEquals(DependencyActionType.REQUEST_LOCATION_PERMISSION, wifiDep.actionType)
+
+      val btDep = state.dependencies.first { it.id == DependencyId.BLUETOOTH }
+      assertFalse(btDep.isMet)
+      assertEquals(CheckStatus.PERMISSION_REQUIRED, btDep.status)
+      assertEquals("Grant Permission", btDep.actionLabel)
+      assertEquals(DependencyActionType.REQUEST_BLUETOOTH_PERMISSION, btDep.actionType)
+
+      val continueDep = state.dependencies.first { it.id == DependencyId.CONTINUE_ACTIVITY_SETTINGS }
+      assertFalse(continueDep.isMet)
+      assertFalse(continueDep.isChecked)
+      assertEquals(CheckStatus.ADVISORY, continueDep.status)
+      assertTrue(continueDep.shouldShowActionButton)
+
+      val report = vm.buildDiagnosticFeedbackReport()
+      assertTrue(report.contains("[3P-ADVISORY]"))
+      assertTrue(report.contains("[PERMISSION-REQUIRED]"))
+      assertTrue(report.contains("FINE_LOCATION=false"))
+      assertTrue(report.contains("BLUETOOTH_CONNECT=false"))
+
+      // Once Location is granted on metered Wi-Fi, status transitions to non-blocking CheckStatus.WARNING (Met with Check)
+      provider.snapshot = provider.snapshot.copy(hasLocationPermission = true)
+      vm.refreshChecks()
+      val wifiGrantedDep = vm.uiState.value.dependencies.first { it.id == DependencyId.PRIVATE_WIFI }
+      assertTrue(wifiGrantedDep.isMet)
+      assertEquals(CheckStatus.WARNING, wifiGrantedDep.status)
+    } finally {
+      Dispatchers.resetMain()
+    }
   }
 }

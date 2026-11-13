@@ -1,10 +1,15 @@
 package com.droid.googlebookfeaturechecker
 
+import android.app.Activity
 import android.app.Application
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInfo
+import android.provider.Settings
+import org.robolectric.Robolectric
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -22,11 +27,14 @@ import com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel
 import com.droid.googlebookfeaturechecker.ui.theme.GooglebookFeatureCheckerTheme
 import com.droid.googlebookfeaturechecker.util.SystemActionLauncher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
@@ -102,10 +110,10 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("feature_card_better_together").assertIsDisplayed()
     composeTestRule.onNodeWithTag("build_type_callout_card").assertDoesNotExist()
 
-    // Scroll to GMS_APK dependency (step #2, outdated !isMet -> shows "Update Apk")
+    // Scroll to GMS_APK dependency (step #2, outdated !isMet -> shows "Update Apk" and NO row checkmark)
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("dependency_card_GMS_APK"))
-    composeTestRule.onNodeWithTag("click_mark_GMS_APK").assertIsOff()
+    composeTestRule.onNodeWithTag("click_mark_GMS_APK").assertDoesNotExist()
     composeTestRule.onNodeWithTag("action_button_GMS_APK").assertIsDisplayed()
     composeTestRule.onNodeWithTag("action_button_GMS_APK").performClick()
     assertNotNull(lastExecutedAction)
@@ -121,11 +129,11 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("update_available_button_CROSS_DEVICE_APK").performClick()
     assertEquals(DependencyId.CROSS_DEVICE_APK, lastExecutedAction?.id)
 
-    // Verify PRIVATE_WIFI (step #4, unmet -> shows "Wifi Not Supported" instead of "Fix Wi-Fi")
+    // Verify PRIVATE_WIFI (step #4, unmet public/captive -> shows "Switch Wi-Fi")
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("dependency_card_PRIVATE_WIFI"))
     composeTestRule.onNodeWithTag("action_button_PRIVATE_WIFI").assertIsDisplayed()
-    composeTestRule.onNodeWithText("Wifi Not Supported").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Switch Wi-Fi").assertIsDisplayed()
 
     // Scroll to BUILD_TYPE at the end of the checklist (step #7) -> listed as a dependency with NO click-mark and NO Met badge
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
@@ -206,5 +214,162 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("dependency_card_BUILD_TYPE").assertIsDisplayed()
     composeTestRule.onNodeWithTag("met_badge_BUILD_TYPE", useUnmergedTree = true).assertDoesNotExist()
     composeTestRule.onNodeWithTag("click_mark_BUILD_TYPE").assertDoesNotExist()
+  }
+
+  @Test
+  fun systemSnapshot_marksCheck6AdvisoryInsteadOfFalseGreen() {
+    val context: Context = ApplicationProvider.getApplicationContext()
+    val provider = SystemDeviceEnvironmentProvider(context)
+    val snapshot = provider.readLocalSystemSnapshot()
+    assertTrue(!snapshot.continueActivityVerifiedBySystem)
+
+    val viewModel = FeatureCheckerViewModel(provider)
+    composeTestRule.setContent {
+      val state = viewModel.uiState.collectAsState().value
+      GooglebookFeatureCheckerTheme(themeMode = state.themeMode) {
+        FeatureCheckerScreen(
+          uiState = state,
+          onSelectFeature = viewModel::selectFeature,
+          onToggleCheckMark = viewModel::toggleDependencyCheckMark,
+          onFocusDependency = viewModel::setFocusedDependencyIndex,
+          onMoveFocusNext = viewModel::moveFocusNext,
+          onMoveFocusPrevious = viewModel::moveFocusPrevious,
+          onToggleFocusedDependency = viewModel::toggleFocusedDependency,
+          onExecuteAction = {},
+          onRefreshChecks = viewModel::refreshChecks,
+          onSetThemeMode = viewModel::setThemeMode,
+          onCycleThemeMode = viewModel::cycleThemeMode,
+          onSendFeedbackReport = {},
+          onOpenReferenceThread = {}
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("dependencies_lazy_column")
+      .performScrollToNode(hasTestTag("dependency_card_CONTINUE_ACTIVITY_SETTINGS"))
+    composeTestRule.onNodeWithTag("advisory_badge_CONTINUE_ACTIVITY_SETTINGS", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("met_badge_CONTINUE_ACTIVITY_SETTINGS", useUnmergedTree = true).assertDoesNotExist()
+    composeTestRule.onNodeWithTag("click_mark_CONTINUE_ACTIVITY_SETTINGS").assertDoesNotExist()
+  }
+
+  @Test
+  fun systemActionLauncher_openCrossDeviceSettingsTargetsLinkDevicesActivity() {
+    val context: Context = ApplicationProvider.getApplicationContext()
+    val shadowPm = Shadows.shadowOf(context.packageManager)
+    val linkDevicesComponent = android.content.ComponentName(
+      "com.google.android.gms",
+      "com.google.android.gms.TestCrossDeviceSettingsActivity"
+    )
+    shadowPm.addActivityIfNotPresent(linkDevicesComponent)
+    shadowPm.getInternalMutablePackageInfo("com.google.android.gms").activities
+      ?.firstOrNull { it.name == linkDevicesComponent.className }
+      ?.apply {
+        exported = true
+        enabled = true
+      }
+    shadowPm.addIntentFilterForActivity(
+      linkDevicesComponent,
+      android.content.IntentFilter("com.google.android.gms.multidevice.ACTION_LINK_DEVICES").apply {
+        addCategory(android.content.Intent.CATEGORY_DEFAULT)
+      }
+    )
+
+    val provider = SystemDeviceEnvironmentProvider(context)
+    val snapshot = provider.readLocalSystemSnapshot()
+    assertTrue(snapshot.crossDeviceSettingsResolvable)
+
+    val viewModel = FeatureCheckerViewModel(provider)
+    val continueDep = viewModel.uiState.value.dependencies.first {
+      it.id == DependencyId.CONTINUE_ACTIVITY_SETTINGS
+    }
+    val launcher = SystemActionLauncher(context)
+    val result = launcher.executeDependencyAction(continueDep)
+    assertTrue(result.contains("Cross-device Services", ignoreCase = true))
+
+    val launchedIntent = Shadows.shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedActivity
+    assertNotNull(launchedIntent)
+    assertEquals("com.google.android.gms.multidevice.ACTION_LINK_DEVICES", launchedIntent.action)
+    assertEquals("com.google.android.gms", launchedIntent.`package`)
+  }
+
+  @Test
+  fun systemDeviceEnvironmentProvider_checksOnlyAmbientStreamingForCrossDeviceServices() {
+    val context: Context = ApplicationProvider.getApplicationContext()
+    val shadowPm = Shadows.shadowOf(context.packageManager)
+
+    // Installing mediashell or Samsung Continuity without com.google.ambient.streaming must NOT satisfy Check #3
+    shadowPm.installPackage(
+      PackageInfo().apply {
+        packageName = "com.google.android.apps.mediashell"
+        versionName = "2.0.9999"
+      }
+    )
+    shadowPm.installPackage(
+      PackageInfo().apply {
+        packageName = "com.samsung.android.mcfds"
+        versionName = "1.5.0"
+      }
+    )
+
+    val provider = SystemDeviceEnvironmentProvider(context)
+    val withoutAmbient = provider.readLocalSystemSnapshot()
+    assertFalse(withoutAmbient.crossDeviceInstalled)
+    assertNull(withoutAmbient.crossDeviceVersionName)
+    assertEquals("com.google.ambient.streaming", withoutAmbient.crossDevicePackageName)
+
+    // Installing com.google.ambient.streaming satisfies Check #3 lookup directly
+    shadowPm.installPackage(
+      PackageInfo().apply {
+        packageName = "com.google.ambient.streaming"
+        versionName = "1.0.1346"
+      }
+    )
+    val withAmbient = provider.readLocalSystemSnapshot()
+    assertTrue(withAmbient.crossDeviceInstalled)
+    assertEquals("1.0.1346", withAmbient.crossDeviceVersionName)
+    assertEquals("com.google.ambient.streaming", withAmbient.crossDevicePackageName)
+  }
+
+  @Test
+  @Config(qualifiers = "w380dp-h840dp")
+  fun systemActionLauncher_sendFeedbackOnPhoneRoutesToAboutPhoneFeedback() {
+    val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+    val launcher = SystemActionLauncher(activity)
+
+    val result = launcher.sendFeedbackReportToGoogle("Diagnostic sample for phone")
+    assertEquals("Opened Settings -> About Phone -> Send Feedback.", result)
+
+    val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    assertNull(clipboard.primaryClip)
+
+    val launchedIntent = Shadows.shadowOf(activity).nextStartedActivity
+    assertNotNull(launchedIntent)
+    assertEquals(Settings.ACTION_DEVICE_INFO_SETTINGS, launchedIntent.action)
+    assertEquals(0, launchedIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
+    assertEquals("device_feedback", launchedIntent.getStringExtra(":settings:fragment_args_key"))
+    assertEquals(
+      "device_feedback",
+      launchedIntent.getBundleExtra(":settings:show_fragment_args")?.getString(":settings:fragment_args_key")
+    )
+  }
+
+  @Test
+  fun systemActionLauncher_sendFeedbackOnGooglebookKeepsGmsFeedbackRoute() {
+    val context: Context = ApplicationProvider.getApplicationContext()
+    val launcher = SystemActionLauncher(context)
+
+    val result = launcher.sendFeedbackReportToGoogle("Diagnostic sample for Googlebook")
+    assertTrue(result.contains("Feedback"))
+
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    assertEquals(
+      "Diagnostic sample for Googlebook",
+      clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+    )
+
+    val launchedIntent = Shadows.shadowOf(ApplicationProvider.getApplicationContext<Application>()).nextStartedActivity
+    assertNotNull(launchedIntent)
+    assertEquals("com.google.android.gms.feedback.LAUNCH", launchedIntent.action)
+    assertEquals("com.google.android.gms", launchedIntent.`package`)
   }
 }

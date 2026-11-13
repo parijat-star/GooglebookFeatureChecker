@@ -16,13 +16,23 @@ enum class DependencyId {
   CONTINUE_ACTIVITY_SETTINGS
 }
 
+enum class CheckStatus {
+  MET,
+  WARNING,
+  ADVISORY,
+  PERMISSION_REQUIRED,
+  NOT_MET
+}
+
 enum class DependencyActionType {
   UPDATE_APK,
   OPEN_SYSTEM_UPDATE,
   OPEN_DEVICE_INFO,
   OPEN_WIFI_SETTINGS,
   OPEN_BLUETOOTH_SETTINGS,
-  OPEN_CROSS_DEVICE_SETTINGS
+  OPEN_CROSS_DEVICE_SETTINGS,
+  REQUEST_LOCATION_PERMISSION,
+  REQUEST_BLUETOOTH_PERMISSION
 }
 
 data class FeatureItem(
@@ -40,17 +50,22 @@ data class DependencyCheckItem(
   val requirementSummary: String,
   val detectedStatus: String,
   val isMet: Boolean,
+  val status: CheckStatus = if (isMet) CheckStatus.MET else CheckStatus.NOT_MET,
   val hasUpdateAvailable: Boolean = false,
   val isChecked: Boolean,
   val whyNotOrFixInstruction: String,
+  val warningOrAdvisoryNote: String? = null,
   val phoneRequirementNote: String,
   val actionLabel: String,
   val actionType: DependencyActionType,
   val targetPackage: String? = null
 ) {
-  /** Only show "Update Apk", "Fix Wi-Fi", etc. when the dependency is not met OR an update is available. */
+  /** Show an action button when unmet, update available, advisory manual step, or permission missing. */
   val shouldShowActionButton: Boolean
-    get() = !isMet || hasUpdateAvailable
+    get() = !isMet ||
+      hasUpdateAvailable ||
+      status == CheckStatus.ADVISORY ||
+      status == CheckStatus.PERMISSION_REQUIRED
 }
 
 data class PhoneDependencyStatusItem(
@@ -85,6 +100,7 @@ data class FeatureCheckerUiState(
   val dependencies: List<DependencyCheckItem> = emptyList(),
   val focusedDependencyIndex: Int = 0,
   val phoneReportState: PhoneReportState,
+  val isRefreshing: Boolean = false,
   val lastCheckedTimestampText: String = "Just now",
   val statusBannerMessage: String? = null
 )
