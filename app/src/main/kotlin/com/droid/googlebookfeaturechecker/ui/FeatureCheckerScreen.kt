@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droid.googlebookfeaturechecker.data.isLaptopOrDesktopFormFactor
+import com.droid.googlebookfeaturechecker.data.isSamsungDevice
 import com.droid.googlebookfeaturechecker.model.CheckStatus
 import com.droid.googlebookfeaturechecker.model.DependencyCheckItem
 import com.droid.googlebookfeaturechecker.model.DependencyId
@@ -1335,6 +1336,7 @@ private fun TroubleshootingFeedbackGroup(
 ) {
   val studio = LocalStudioColors.current
   val isPhone = !isLaptopOrDesktopFormFactor(LocalContext.current)
+  val isSamsungPhone = isPhone && isSamsungDevice()
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -1372,10 +1374,10 @@ private fun TroubleshootingFeedbackGroup(
             color = MaterialTheme.colorScheme.onSurface
           )
           Text(
-            text = if (isPhone) {
-              "Opens Settings -> About Phone -> Send Feedback"
-            } else {
-              "Copies your device & dependency diagnostics and opens Google Feedback Report"
+            text = when {
+              isSamsungPhone -> "Opens Google Settings (? -> Send feedback)"
+              isPhone -> "Opens Settings -> About Phone -> Send Feedback"
+              else -> "Copies your device & dependency diagnostics and opens Google Feedback Report"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant

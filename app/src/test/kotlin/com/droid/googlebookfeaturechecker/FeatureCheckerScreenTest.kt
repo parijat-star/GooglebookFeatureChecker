@@ -36,6 +36,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowBuild
 
 @RunWith(AndroidJUnit4::class)
 @Config(application = Application::class, qualifiers = "w1024dp-h768dp")
@@ -333,24 +334,54 @@ class FeatureCheckerScreenTest {
   @Test
   @Config(qualifiers = "w380dp-h840dp")
   fun systemActionLauncher_sendFeedbackOnPhoneRoutesToAboutPhoneFeedback() {
-    val activity = Robolectric.buildActivity(Activity::class.java).create().get()
-    val launcher = SystemActionLauncher(activity)
+    ShadowBuild.setManufacturer("Google")
+    try {
+      val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+      val launcher = SystemActionLauncher(activity)
 
-    val result = launcher.sendFeedbackReportToGoogle("Diagnostic sample for phone")
-    assertEquals("Opened Settings -> About Phone -> Send Feedback.", result)
+      val result = launcher.sendFeedbackReportToGoogle("Diagnostic sample for phone")
+      assertEquals("Opened Settings -> About Phone -> Send Feedback.", result)
 
-    val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    assertNull(clipboard.primaryClip)
+      val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+      assertNull(clipboard.primaryClip)
 
-    val launchedIntent = Shadows.shadowOf(activity).nextStartedActivity
-    assertNotNull(launchedIntent)
-    assertEquals(Settings.ACTION_DEVICE_INFO_SETTINGS, launchedIntent.action)
-    assertEquals(0, launchedIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
-    assertEquals("device_feedback", launchedIntent.getStringExtra(":settings:fragment_args_key"))
-    assertEquals(
-      "device_feedback",
-      launchedIntent.getBundleExtra(":settings:show_fragment_args")?.getString(":settings:fragment_args_key")
-    )
+      val launchedIntent = Shadows.shadowOf(activity).nextStartedActivity
+      assertNotNull(launchedIntent)
+      assertEquals(Settings.ACTION_DEVICE_INFO_SETTINGS, launchedIntent.action)
+      assertEquals(0, launchedIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
+      assertEquals("device_feedback", launchedIntent.getStringExtra(":settings:fragment_args_key"))
+      assertEquals(
+        "device_feedback",
+        launchedIntent.getBundleExtra(":settings:show_fragment_args")?.getString(":settings:fragment_args_key")
+      )
+    } finally {
+      ShadowBuild.reset()
+    }
+  }
+
+  @Test
+  @Config(qualifiers = "w380dp-h840dp")
+  fun systemActionLauncher_sendFeedbackOnSamsungPhoneRoutesToGoogleSettings() {
+    ShadowBuild.setManufacturer("samsung")
+    try {
+      val activity = Robolectric.buildActivity(Activity::class.java).create().get()
+      val launcher = SystemActionLauncher(activity)
+
+      val result = launcher.sendFeedbackReportToGoogle("Diagnostic sample for Samsung phone")
+      assertEquals("Opened Google Settings (? -> Send feedback).", result)
+
+      val clipboard = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+      assertNull(clipboard.primaryClip)
+
+      val launchedIntent = Shadows.shadowOf(activity).nextStartedActivity
+      assertNotNull(launchedIntent)
+      assertEquals("com.android.settings.action.EXTRA_SETTINGS", launchedIntent.action)
+      assertEquals("com.google.android.gms", launchedIntent.`package`)
+      assertTrue(launchedIntent.hasCategory(Intent.CATEGORY_DEFAULT))
+      assertEquals(0, launchedIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
+    } finally {
+      ShadowBuild.reset()
+    }
   }
 
   @Test

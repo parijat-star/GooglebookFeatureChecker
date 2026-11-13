@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.PersistableBundle
 import android.provider.Settings
 import com.droid.googlebookfeaturechecker.data.isLaptopOrDesktopFormFactor
+import com.droid.googlebookfeaturechecker.data.isSamsungDevice
 import com.droid.googlebookfeaturechecker.model.DependencyActionType
 import com.droid.googlebookfeaturechecker.model.DependencyCheckItem
 import com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel
@@ -200,17 +201,43 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
     }
 
     // On phones, do not copy to clipboard (avoids SystemUI clipboard overlay) and route
-    // directly to Settings -> About Phone scrolled to the Send Feedback section.
+    // directly to the OEM's supported system feedback entry point.
     if (!isLaptopOrDesktopFormFactor(context)) {
+      val settingsIntent = Intent(Settings.ACTION_SETTINGS).apply {
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      if (isSamsungDevice()) {
+        // Samsung One UI omits Pixel's About Phone -> Send feedback entry; route to Google Settings
+        // or Cross-device Services where the '?' Help & feedback -> Send feedback option lives.
+        val googleSettingsIntent = Intent(ACTION_GOOGLE_EXTRA_SETTINGS).apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val crossDeviceFeedbackIntent = Intent(ACTION_LINK_DEVICES).apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return when {
+          tryStartActivity(googleSettingsIntent) ->
+            "Opened Google Settings (? -> Send feedback)."
+          tryStartActivity(crossDeviceFeedbackIntent) ->
+            "Opened Cross-device Services (? -> Send feedback)."
+          tryStartActivity(settingsIntent) ->
+            "Opened Settings (Google -> ? -> Send feedback)."
+          tryStartActivity(chooserIntent) ->
+            "Opened Feedback Report sender."
+          else ->
+            "Open Settings -> Google -> ? -> Send feedback."
+        }
+      }
       val highlightArgs = Bundle().apply {
         putString(SETTINGS_FRAGMENT_ARGS_KEY, DEVICE_FEEDBACK_PREFERENCE_KEY)
       }
       val aboutPhoneFeedbackIntent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS).apply {
         putExtra(SETTINGS_SHOW_FRAGMENT_ARGS, highlightArgs)
         putExtra(SETTINGS_FRAGMENT_ARGS_KEY, DEVICE_FEEDBACK_PREFERENCE_KEY)
-        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      }
-      val settingsIntent = Intent(Settings.ACTION_SETTINGS).apply {
         if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
       return when {
@@ -290,6 +317,8 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
   }
 
   private companion object {
+    const val ACTION_GOOGLE_EXTRA_SETTINGS = "com.android.settings.action.EXTRA_SETTINGS"
+    const val ACTION_LINK_DEVICES = "com.google.android.gms.multidevice.ACTION_LINK_DEVICES"
     const val SETTINGS_FRAGMENT_ARGS_KEY = ":settings:fragment_args_key"
     const val SETTINGS_SHOW_FRAGMENT_ARGS = ":settings:show_fragment_args"
     const val DEVICE_FEEDBACK_PREFERENCE_KEY = "device_feedback"

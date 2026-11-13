@@ -83,6 +83,11 @@ fun isLaptopOrDesktopFormFactor(context: Context): Boolean {
     config.smallestScreenWidthDp >= 600
 }
 
+/**
+ * Returns true when running on a Samsung device, where Settings structure differs from Pixel/AOSP.
+ */
+fun isSamsungDevice(): Boolean = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
+
 class SystemDeviceEnvironmentProvider(
   private val context: Context,
   private val companionHostOverride: String? = null,
