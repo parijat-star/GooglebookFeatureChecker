@@ -42,8 +42,6 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -64,14 +62,20 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +83,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.droid.googlebookfeaturechecker.data.isLaptopOrDesktopFormFactor
+import com.droid.googlebookfeaturechecker.data.isSamsungDevice
+import com.droid.googlebookfeaturechecker.model.CheckStatus
 import com.droid.googlebookfeaturechecker.model.DependencyCheckItem
 import com.droid.googlebookfeaturechecker.model.DependencyId
 import com.droid.googlebookfeaturechecker.model.FeatureCheckerUiState
@@ -176,20 +183,10 @@ fun FeatureCheckerScreen(
     modifier = modifier
       .fillMaxSize()
       .onPreviewKeyEvent { event ->
-        if (event.type == KeyEventType.KeyDown) {
+        if (event.type == KeyEventType.KeyDown &&
+          !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed
+        ) {
           when (event.key) {
-            Key.DirectionDown -> {
-              onMoveFocusNext()
-              true
-            }
-            Key.DirectionUp -> {
-              onMoveFocusPrevious()
-              true
-            }
-            Key.Spacebar, Key.Enter -> {
-              onToggleFocusedDependency()
-              true
-            }
             Key.R -> {
               onRefreshChecks()
               true
@@ -409,6 +406,10 @@ private fun ConnectedThemeSwitcher(
             if (selected) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.secondaryContainer
           )
+          .semantics {
+            role = Role.Tab
+            this.selected = selected
+          }
           .clickable { onSetThemeMode(mode) }
           .padding(horizontal = if (compact) 9.dp else 12.dp)
           .testTag("theme_chip_${mode.name}"),
@@ -432,7 +433,7 @@ private fun RecheckPillButton(onRefreshChecks: () -> Unit) {
       .height(34.dp)
       .clip(RoundedCornerShape(18.dp))
       .background(MaterialTheme.colorScheme.secondaryContainer)
-      .clickable(onClick = onRefreshChecks)
+      .clickable(role = Role.Button, onClick = onRefreshChecks)
       .padding(horizontal = 12.dp)
       .testTag("recheck_all_button"),
     contentAlignment = Alignment.Center
@@ -471,7 +472,6 @@ private fun StudioDeviceOverviewPane(
 ) {
   val studio = LocalStudioColors.current
   val metCount = uiState.dependencies.count { it.isMet }
-  val checkedCount = uiState.dependencies.count { it.isChecked }
   val total = uiState.dependencies.size.coerceAtLeast(1)
 
   // 1. Minimalist Line-Art Illustration (compact height on phone so checklist stays above the fold)
@@ -482,7 +482,7 @@ private fun StudioDeviceOverviewPane(
       .height(if (isCompactPhone) 124.dp else 158.dp)
   )
 
-  // 2. Three Metric Cells with thin rounded progress bars
+  // 2. Two Metric Cells with thin rounded progress bars
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = Arrangement.spacedBy(if (isCompactPhone) 10.dp else 18.dp)
@@ -495,20 +495,12 @@ private fun StudioDeviceOverviewPane(
       compact = isCompactPhone,
       modifier = Modifier.weight(1f)
     )
-    MetricBarCell(
-      label = "Click-marked",
-      headline = "$checkedCount/$total",
-      fraction = checkedCount.toFloat() / total.toFloat(),
-      sub = "Click to mark",
-      compact = isCompactPhone,
-      modifier = Modifier.weight(1f)
-    )
     val phoneConnected = uiState.phoneReportState is PhoneReportState.Connected
     MetricBarCell(
-      label = "Phone check",
+      label = "Other device",
       headline = if (phoneConnected) "Linked" else "Tip",
       fraction = if (phoneConnected) 1f else 0.35f,
-      sub = if (phoneConnected) "Verified" else "Run on phone",
+      sub = if (phoneConnected) "Verified" else "Install on other device",
       compact = isCompactPhone,
       modifier = Modifier.weight(1f)
     )
@@ -537,6 +529,10 @@ private fun StudioDeviceOverviewPane(
               if (selected) MaterialTheme.colorScheme.primary
               else MaterialTheme.colorScheme.secondaryContainer
             )
+            .semantics {
+              role = Role.Tab
+              this.selected = selected
+            }
             .clickable { onSelectFeature(feature.id) }
             .padding(horizontal = 16.dp)
             .testTag("feature_card_${feature.id}"),
@@ -613,7 +609,7 @@ private fun StudioDeviceOverviewPane(
         .fillMaxWidth()
         .clip(groupShape(totalRows - 1, totalRows))
         .background(studio.card)
-        .clickable(onClick = onOpenReferenceThread)
+        .clickable(role = Role.Button, onClick = onOpenReferenceThread)
         .padding(horizontal = 18.dp, vertical = 13.dp)
         .testTag("reference_thread_button"),
       verticalAlignment = Alignment.CenterVertically,
@@ -947,12 +943,20 @@ private fun DependencySettingRow(
       .background(bgColor)
       .hoverable(interactionSource)
       .focusable()
-      .clickable {
-        if (isBuildTypeRow) {
-          onFocus()
+      .onKeyEvent { event ->
+        if (!isBuildTypeRow &&
+          item.shouldShowActionButton &&
+          event.type == KeyEventType.KeyDown &&
+          (event.key == Key.Spacebar || event.key == Key.Enter)
+        ) {
+          onExecuteAction()
+          true
         } else {
-          onToggleCheckMark()
+          false
         }
+      }
+      .clickable {
+        onFocus()
       }
       .padding(horizontal = if (isCompactPhone) 14.dp else 20.dp, vertical = 14.dp)
       .testTag("dependency_card_${item.id.name}"),
@@ -963,23 +967,8 @@ private fun DependencySettingRow(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(if (isCompactPhone) 10.dp else 14.dp)
     ) {
-      // Click-mark Checkbox on confirmable dependencies (omitted on #7 Matching device build type since phone type cannot be confirmed locally)
-      if (!isBuildTypeRow) {
-        Checkbox(
-          checked = item.isChecked,
-          onCheckedChange = { onToggleCheckMark() },
-          colors = CheckboxDefaults.colors(
-            checkedColor = studio.metGreen,
-            checkmarkColor = studio.onMetGreen,
-            uncheckedColor = MaterialTheme.colorScheme.outline
-          ),
-          modifier = Modifier
-            .testTag("click_mark_${item.id.name}")
-            .semantics {
-              contentDescription = "Click-mark for ${item.title}"
-            }
-        )
-      }
+      @Suppress("UNUSED_VARIABLE")
+      val unusedToggle = onToggleCheckMark
 
       Column(
         modifier = Modifier.weight(1f),
@@ -1002,125 +991,185 @@ private fun DependencySettingRow(
       }
 
       // Status & Action Column (omitted on #7 Matching device build type since phone type cannot be confirmed locally):
-      // - When !item.isMet: show primary action button ("Update Apk", "Wifi Not Supported", etc.)
-      // - When item.isMet: show green "✓ Met" box, AND if item.hasUpdateAvailable is true,
-      //   show an "Update Available" button directly underneath "Met".
       if (!isBuildTypeRow) {
-        if (!item.isMet) {
-          if (!isCompactPhone) {
-            Button(
-              onClick = {
-                onFocus()
-                onExecuteAction()
-              },
-              shape = RoundedCornerShape(16.dp),
-              colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-              ),
-              contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-              modifier = Modifier.testTag("action_button_${item.id.name}")
+        val showInlineAction = item.status == CheckStatus.NOT_MET ||
+          item.status == CheckStatus.PERMISSION_REQUIRED ||
+          item.status == CheckStatus.ADVISORY
+        when (item.status) {
+          CheckStatus.ADVISORY -> {
+            Column(
+              horizontalAlignment = Alignment.End,
+              verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-              Text(
-                text = item.actionLabel,
-                style = MaterialTheme.typography.labelMedium
-              )
-            }
-          }
-        } else {
-          Column(
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-          ) {
-            // Green Met checkmark box
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(studio.metGreenContainer)
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-                .testTag("met_badge_${item.id.name}")
-            ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(studio.advisoryContainer)
+                  .padding(horizontal = 12.dp, vertical = 6.dp)
+                  .testTag("advisory_badge_${item.id.name}")
               ) {
-                Icon(
-                  imageVector = Icons.Default.Check,
-                  contentDescription = null,
-                  tint = studio.onMetGreenContainer,
-                  modifier = Modifier.size(15.dp)
-                )
                 Text(
-                  text = "Met",
+                  text = "Verify",
                   style = MaterialTheme.typography.labelMedium,
-                  color = studio.onMetGreenContainer
+                  color = studio.onAdvisoryContainer
                 )
               }
+              if (!isCompactPhone) {
+                Button(
+                  onClick = {
+                    onFocus()
+                    onExecuteAction()
+                  },
+                  shape = RoundedCornerShape(16.dp),
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                  ),
+                  contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                  modifier = Modifier.testTag("action_button_${item.id.name}")
+                ) {
+                  Text(
+                    text = item.actionLabel,
+                    style = MaterialTheme.typography.labelMedium
+                  )
+                }
+              }
             }
-
-            // Requirement 2: If an update is available, add a button under Met saying "Update Available"
-            // even if the condition is met. If no update is available, leave Met as is.
-            if (item.hasUpdateAvailable) {
+          }
+          CheckStatus.NOT_MET, CheckStatus.PERMISSION_REQUIRED -> {
+            if (!isCompactPhone) {
               Button(
                 onClick = {
                   onFocus()
                   onExecuteAction()
                 },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                  containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                  contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                  containerColor = MaterialTheme.colorScheme.primary,
+                  contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.testTag("update_available_button_${item.id.name}")
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.testTag("action_button_${item.id.name}")
               ) {
                 Text(
-                  text = "Update Available",
+                  text = item.actionLabel,
                   style = MaterialTheme.typography.labelMedium
                 )
               }
             }
           }
+          CheckStatus.MET, CheckStatus.WARNING -> {
+            Column(
+              horizontalAlignment = Alignment.End,
+              verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              // Green Met checkmark box
+              Box(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(studio.metGreenContainer)
+                  .padding(horizontal = 12.dp, vertical = 6.dp)
+                  .testTag("met_badge_${item.id.name}")
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = studio.onMetGreenContainer,
+                    modifier = Modifier.size(15.dp)
+                  )
+                  Text(
+                    text = if (item.status == CheckStatus.WARNING) "Met (Check)" else "Met",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = studio.onMetGreenContainer
+                  )
+                }
+              }
+
+              // Secondary action button under Met when an update or permission upgrade is available
+              if (item.hasUpdateAvailable) {
+                val secondaryLabel = if (item.actionLabel.startsWith("Grant")) {
+                  item.actionLabel
+                } else {
+                  "Update Available"
+                }
+                Button(
+                  onClick = {
+                    onFocus()
+                    onExecuteAction()
+                  },
+                  shape = RoundedCornerShape(12.dp),
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                  ),
+                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                  modifier = Modifier.testTag("update_available_button_${item.id.name}")
+                ) {
+                  Text(
+                    text = secondaryLabel,
+                    style = MaterialTheme.typography.labelMedium
+                  )
+                }
+              }
+            }
+          }
         }
+        @Suppress("UNUSED_VARIABLE")
+        val unused = showInlineAction
       }
     }
 
-    // Explanation when not met, plus callout for phone requirement (and full-width/aligned action button on compact phone)
+    // Explanation when not met, warning/advisory details, plus phone requirement callout
     Column(
-      modifier = Modifier.padding(
-        start = when {
-          isBuildTypeRow -> 0.dp
-          isCompactPhone -> 40.dp
-          else -> 48.dp
-        }
-      ),
       verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-      if (!item.isMet && !isBuildTypeRow) {
+      val needsActionRow = !isBuildTypeRow &&
+        (item.status == CheckStatus.NOT_MET ||
+          item.status == CheckStatus.PERMISSION_REQUIRED ||
+          item.status == CheckStatus.ADVISORY)
+
+      if (!item.isMet && !isBuildTypeRow && item.status != CheckStatus.ADVISORY) {
         Text(
           text = item.whyNotOrFixInstruction,
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.tertiary
         )
-        if (isCompactPhone) {
-          Button(
-            onClick = {
-              onFocus()
-              onExecuteAction()
-            },
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.primary,
-              contentColor = MaterialTheme.colorScheme.onPrimary
-            ),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            modifier = Modifier.testTag("action_button_${item.id.name}")
-          ) {
-            Text(
-              text = item.actionLabel,
-              style = MaterialTheme.typography.labelMedium
-            )
-          }
+      }
+      if (!item.warningOrAdvisoryNote.isNullOrBlank() && !isBuildTypeRow) {
+        Text(
+          text = item.warningOrAdvisoryNote,
+          style = MaterialTheme.typography.bodySmall,
+          color = studio.onAdvisoryContainer,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(studio.advisoryContainer)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .testTag("advisory_note_${item.id.name}")
+        )
+      }
+      if (needsActionRow && isCompactPhone) {
+        Button(
+          onClick = {
+            onFocus()
+            onExecuteAction()
+          },
+          shape = RoundedCornerShape(14.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+          ),
+          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+          modifier = Modifier.testTag("action_button_${item.id.name}")
+        ) {
+          Text(
+            text = item.actionLabel,
+            style = MaterialTheme.typography.labelMedium
+          )
         }
       }
       Text(
@@ -1144,7 +1193,7 @@ private fun CompanionPhoneGroup(
     verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
     Text(
-      text = "Companion phone",
+      text = "Other device",
       modifier = Modifier.padding(horizontal = 20.dp),
       style = MaterialTheme.typography.titleSmall,
       color = MaterialTheme.colorScheme.primary
@@ -1179,7 +1228,7 @@ private fun CompanionPhoneGroup(
                   color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                  text = "Companion phone reported live status",
+                  text = "Other device reported live status",
                   style = MaterialTheme.typography.bodySmall,
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1262,7 +1311,7 @@ private fun CompanionPhoneGroup(
             verticalArrangement = Arrangement.spacedBy(5.dp)
           ) {
             Text(
-              text = "What your phone also needs",
+              text = "What the other device also needs",
               style = MaterialTheme.typography.titleSmall,
               color = studio.onMetGreenContainer
             )
@@ -1286,6 +1335,8 @@ private fun TroubleshootingFeedbackGroup(
   onOpenReferenceThread: () -> Unit
 ) {
   val studio = LocalStudioColors.current
+  val isPhone = !isLaptopOrDesktopFormFactor(LocalContext.current)
+  val isSamsungPhone = isPhone && isSamsungDevice()
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -1307,7 +1358,7 @@ private fun TroubleshootingFeedbackGroup(
           .heightIn(min = 64.dp)
           .clip(groupShape(0, 2))
           .background(studio.card)
-          .clickable(onClick = onSendFeedbackReport)
+          .clickable(role = Role.Button, onClick = onSendFeedbackReport)
           .padding(horizontal = 20.dp, vertical = 14.dp)
           .testTag("send_feedback_button"),
         verticalAlignment = Alignment.CenterVertically,
@@ -1323,7 +1374,11 @@ private fun TroubleshootingFeedbackGroup(
             color = MaterialTheme.colorScheme.onSurface
           )
           Text(
-            text = "Copies your device & dependency diagnostics and opens Google Feedback Report",
+            text = when {
+              isSamsungPhone -> "Opens Google Settings (? -> Send feedback)"
+              isPhone -> "Opens Settings -> About Phone -> Send Feedback"
+              else -> "Copies your device & dependency diagnostics and opens Google Feedback Report"
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
           )
@@ -1349,7 +1404,7 @@ private fun TroubleshootingFeedbackGroup(
           .heightIn(min = 58.dp)
           .clip(groupShape(1, 2))
           .background(studio.card)
-          .clickable(onClick = onOpenReferenceThread)
+          .clickable(role = Role.Button, onClick = onOpenReferenceThread)
           .padding(horizontal = 20.dp, vertical = 12.dp)
           .testTag("bottom_support_thread_button"),
         verticalAlignment = Alignment.CenterVertically,

@@ -1,5 +1,6 @@
 package com.droid.googlebookfeaturechecker.util
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -7,8 +8,11 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.PersistableBundle
 import android.provider.Settings
+import com.droid.googlebookfeaturechecker.data.isLaptopOrDesktopFormFactor
+import com.droid.googlebookfeaturechecker.data.isSamsungDevice
 import com.droid.googlebookfeaturechecker.model.DependencyActionType
 import com.droid.googlebookfeaturechecker.model.DependencyCheckItem
 import com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel
@@ -58,11 +62,36 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
+        val playSystemUpdateIntent = Intent("android.settings.SYSTEM_UPDATE_SETTINGS").apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val isGms = pkg == FeatureCheckerViewModel.GMS_PACKAGE
         when {
-          tryStartActivity(marketIntent) -> "Opened Google Play Store to Update Apk ($pkg)."
+          tryStartActivity(marketIntent) -> if (isGms) {
+            "Opened Play Store to Update Apk ($pkg) (if no Update button appears, check Settings > Google / System update)."
+          } else {
+            "Opened Google Play Store to Update Apk ($pkg)."
+          }
           tryStartActivity(webPlayIntent) -> "Opened Google Play web store to Update Apk ($pkg)."
           tryStartActivity(appDetailsIntent) -> "Opened App Info for $pkg (tap 'App details in store' > 'Update')."
-          else -> "Requested Update Apk for $pkg (v${if (pkg == FeatureCheckerViewModel.GMS_PACKAGE) "26.37+" else "1.0.1346+"})."
+          isGms && tryStartActivity(playSystemUpdateIntent) -> "Opened System Update settings to check Google Play services / system updates."
+          else -> "Requested Update Apk for $pkg (v${if (isGms) "26.37+" else "1.0.1346+"})."
+        }
+      }
+
+      DependencyActionType.REQUEST_LOCATION_PERMISSION,
+      DependencyActionType.REQUEST_BLUETOOTH_PERMISSION -> {
+        val appDetailsIntent = Intent(
+          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+          Uri.fromParts("package", context.packageName, null)
+        ).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (tryStartActivity(appDetailsIntent)) {
+          "Opened App Permissions in Settings to grant Location / Nearby Bluetooth access."
+        } else {
+          "Open Settings > Apps > Googlebook Feature Checker > Permissions to grant required permissions."
         }
       }
 
@@ -120,6 +149,16 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
       }
 
       DependencyActionType.OPEN_CROSS_DEVICE_SETTINGS -> {
+        val linkDevicesIntent = Intent("com.google.android.gms.multidevice.ACTION_LINK_DEVICES").apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val preLinkDevicesIntent = Intent("com.google.android.gms.multidevice.ACTION_PRE_LINK_DEVICES").apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         val crossDeviceIntent = Intent("com.google.android.gms.settings.CROSS_DEVICE_SETTINGS").apply {
           setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -132,14 +171,18 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         when {
+          tryStartActivity(linkDevicesIntent) ->
+            "Opened Cross-device Services settings."
+          tryStartActivity(preLinkDevicesIntent) ->
+            "Opened Cross-device Services settings."
           tryStartActivity(crossDeviceIntent) ->
-            "Opened Cross-device Services settings (enable Tasks, Apps, Notifications, Files & media)."
+            "Opened Cross-device Services settings."
           tryStartActivity(googleSettingsIntent) ->
             "Opened Google Account settings (navigate to Devices & sharing > Cross-device services)."
           tryStartActivity(settingsIntent) ->
-            "Opened Settings (search for 'Continue activity' under Cross-device services)."
+            "Opened Settings (search for 'Cross-device services')."
           else ->
-            "Search Settings for 'Continue activity' under Cross-device services and turn all options ON."
+            "Open Settings > Google > Devices & sharing > Cross-device services."
         }
       }
     }
@@ -147,6 +190,68 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
 
   override fun sendFeedbackReportToGoogle(diagnosticReport: String): String {
     val safeReport = diagnosticReport.take(8192)
+
+    val shareFeedbackIntent = Intent(Intent.ACTION_SEND).apply {
+      type = "text/plain"
+      putExtra(Intent.EXTRA_SUBJECT, "Googlebook Better Together Feedback & Bug Report")
+      putExtra(Intent.EXTRA_TEXT, safeReport)
+    }
+    val chooserIntent = Intent.createChooser(shareFeedbackIntent, "Send Feedback Report to Google").apply {
+      if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    // On phones, do not copy to clipboard (avoids SystemUI clipboard overlay) and route
+    // directly to the OEM's supported system feedback entry point.
+    if (!isLaptopOrDesktopFormFactor(context)) {
+      val settingsIntent = Intent(Settings.ACTION_SETTINGS).apply {
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      if (isSamsungDevice()) {
+        // Samsung One UI omits Pixel's About Phone -> Send feedback entry; route to Google Settings
+        // or Cross-device Services where the '?' Help & feedback -> Send feedback option lives.
+        val googleSettingsIntent = Intent(ACTION_GOOGLE_EXTRA_SETTINGS).apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val crossDeviceFeedbackIntent = Intent(ACTION_LINK_DEVICES).apply {
+          setPackage(FeatureCheckerViewModel.GMS_PACKAGE)
+          addCategory(Intent.CATEGORY_DEFAULT)
+          if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return when {
+          tryStartActivity(googleSettingsIntent) ->
+            "Opened Google Settings (? -> Send feedback)."
+          tryStartActivity(crossDeviceFeedbackIntent) ->
+            "Opened Cross-device Services (? -> Send feedback)."
+          tryStartActivity(settingsIntent) ->
+            "Opened Settings (Google -> ? -> Send feedback)."
+          tryStartActivity(chooserIntent) ->
+            "Opened Feedback Report sender."
+          else ->
+            "Open Settings -> Google -> ? -> Send feedback."
+        }
+      }
+      val highlightArgs = Bundle().apply {
+        putString(SETTINGS_FRAGMENT_ARGS_KEY, DEVICE_FEEDBACK_PREFERENCE_KEY)
+      }
+      val aboutPhoneFeedbackIntent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS).apply {
+        putExtra(SETTINGS_SHOW_FRAGMENT_ARGS, highlightArgs)
+        putExtra(SETTINGS_FRAGMENT_ARGS_KEY, DEVICE_FEEDBACK_PREFERENCE_KEY)
+        if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      return when {
+        tryStartActivity(aboutPhoneFeedbackIntent) ->
+          "Opened Settings -> About Phone -> Send Feedback."
+        tryStartActivity(settingsIntent) ->
+          "Opened Settings (About Phone -> Send Feedback)."
+        tryStartActivity(chooserIntent) ->
+          "Opened Feedback Report sender."
+        else ->
+          "Open Settings -> About Phone -> Send Feedback."
+      }
+    }
+
     copyToClipboard("Googlebook Better Together Diagnostic Report", safeReport)
 
     val gmsFeedbackIntent = Intent("com.google.android.gms.feedback.LAUNCH").apply {
@@ -157,14 +262,6 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
     }
     val bugReportIntent = Intent(Intent.ACTION_BUG_REPORT).apply {
       putExtra(Intent.EXTRA_TEXT, safeReport)
-      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    val shareFeedbackIntent = Intent(Intent.ACTION_SEND).apply {
-      type = "text/plain"
-      putExtra(Intent.EXTRA_SUBJECT, "Googlebook Better Together Feedback & Bug Report")
-      putExtra(Intent.EXTRA_TEXT, safeReport)
-    }
-    val chooserIntent = Intent.createChooser(shareFeedbackIntent, "Send Feedback Report to Google").apply {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
@@ -217,5 +314,13 @@ class SystemActionLauncher(private val context: Context) : ActionNavigator {
     } catch (_: Exception) {
       false
     }
+  }
+
+  private companion object {
+    const val ACTION_GOOGLE_EXTRA_SETTINGS = "com.android.settings.action.EXTRA_SETTINGS"
+    const val ACTION_LINK_DEVICES = "com.google.android.gms.multidevice.ACTION_LINK_DEVICES"
+    const val SETTINGS_FRAGMENT_ARGS_KEY = ":settings:fragment_args_key"
+    const val SETTINGS_SHOW_FRAGMENT_ARGS = ":settings:show_fragment_args"
+    const val DEVICE_FEEDBACK_PREFERENCE_KEY = "device_feedback"
   }
 }
