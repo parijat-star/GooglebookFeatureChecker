@@ -33,6 +33,25 @@ import com.droid.googlebookfeaturechecker.ui.theme.GooglebookFeatureCheckerTheme
 import com.droid.googlebookfeaturechecker.util.ActionNavigator
 import com.droid.googlebookfeaturechecker.util.SystemActionLauncher
 
+/**
+ * Evaluates whether the runtime permission result satisfies the specific permission action requested.
+ * On Android 12+ (API 31+), Wi-Fi SSID inspection requires ACCESS_FINE_LOCATION (coarse-only is insufficient),
+ * so selecting "Approximate" must return false to trigger the App Permissions settings fallback.
+ */
+internal fun isRequiredPermissionGranted(
+  pendingActionType: DependencyActionType?,
+  permissions: Map<String, Boolean>,
+  sdkInt: Int = Build.VERSION.SDK_INT
+): Boolean {
+  return when (pendingActionType) {
+    DependencyActionType.REQUEST_LOCATION_PERMISSION ->
+      permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+    DependencyActionType.REQUEST_BLUETOOTH_PERMISSION ->
+      sdkInt < Build.VERSION_CODES.S || permissions[Manifest.permission.BLUETOOTH_CONNECT] == true
+    else -> permissions.values.any { it }
+  }
+}
+
 class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,7 +82,7 @@ class MainActivity : ComponentActivity() {
       ) { permissions ->
         val pending = pendingPermissionAction
         pendingPermissionAction = null
-        if (permissions.values.any { it }) {
+        if (isRequiredPermissionGranted(pending?.actionType, permissions)) {
           viewModel.refreshChecksAsync(bannerMessage = "Permissions updated; refreshed checks.")
         } else if (pending != null) {
           val msg = actionNavigator.executeDependencyAction(pending)

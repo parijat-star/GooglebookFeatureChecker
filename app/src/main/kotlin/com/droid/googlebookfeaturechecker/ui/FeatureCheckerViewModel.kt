@@ -20,6 +20,7 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,6 +66,7 @@ class FeatureCheckerViewModel(
   val uiState: StateFlow<FeatureCheckerUiState> = _uiState.asStateFlow()
 
   private var lastSnapshot: DeviceSystemSnapshot? = null
+  private var refreshJob: Job? = null
 
   init {
     if (!loadSynchronously) {
@@ -128,14 +130,16 @@ class FeatureCheckerViewModel(
   }
 
   fun refreshChecks() {
+    refreshJob?.cancel()
     val snapshot = environmentProvider.readLocalSystemSnapshot()
     val companion = environmentProvider.probeCompanionPhone()
     applySnapshotState(snapshot, companion, "Refreshed all 7 dependency checks.")
   }
 
   fun refreshChecksAsync(bannerMessage: String? = "Refreshed all 7 dependency checks.") {
+    refreshJob?.cancel()
     _uiState.update { it.copy(isRefreshing = true) }
-    viewModelScope.launch {
+    refreshJob = viewModelScope.launch {
       val (snapshot, companion) = withContext(ioDispatcher) {
         environmentProvider.readLocalSystemSnapshot() to environmentProvider.probeCompanionPhone()
       }
@@ -324,6 +328,16 @@ class FeatureCheckerViewModel(
     }
     val androidVersionMet = (majorRelease >= 17L || snapshot.sdkInt >= 37) && oneUiMet
     val oneUiSuffix = snapshot.oneUiVersion?.let { " · One UI $it" } ?: ""
+    val companionAndroidMet = companion?.let {
+      VersionComparator.isAtLeast(it.androidRelease, "17") &&
+        (it.oneUiVersion == null || VersionComparator.isAtLeast(it.oneUiVersion, "9.0"))
+    }
+    val androidCompanionNote = if (companion != null) {
+      "${companion.phoneModel}: Android ${companion.androidRelease}" +
+        (companion.oneUiVersion?.let { " · One UI $it" } ?: "")
+    } else {
+      "Please check your other device is also on Android 17 (One UI 9.0 on Samsung Galaxy)."
+    }
     val androidItem = DependencyCheckItem(
       id = DependencyId.ANDROID_VERSION,
       stepNumber = 1,
@@ -331,6 +345,8 @@ class FeatureCheckerViewModel(
       requirementSummary = "Requires Android 17 (API 37+) on both devices, and One UI 9.0+ on Samsung Galaxy phones.",
       detectedStatus = "Android ${snapshot.androidRelease} (API ${snapshot.sdkInt}$oneUiSuffix)",
       isMet = androidVersionMet,
+      isLocalDeviceMet = androidVersionMet,
+      companionIsMet = companionAndroidMet,
       hasUpdateAvailable = !androidVersionMet,
       isChecked = manualCheckOverrides[DependencyId.ANDROID_VERSION] ?: androidVersionMet,
       whyNotOrFixInstruction = if (androidVersionMet) {
@@ -338,7 +354,7 @@ class FeatureCheckerViewModel(
       } else {
         "Update to Android 17 (One UI 9.0 on Galaxy phones) in Settings > System > Software update."
       },
-      phoneRequirementNote = "Phone must also run Android 17 (Settings > About phone > Software information).",
+      phoneRequirementNote = androidCompanionNote,
       actionLabel = "Check System Update",
       actionType = DependencyActionType.OPEN_SYSTEM_UPDATE
     )
@@ -351,6 +367,14 @@ class FeatureCheckerViewModel(
     } else {
       "Not installed · requires v$REQUIRED_GMS_VERSION+"
     }
+    val companionGmsMet = companion?.let {
+      VersionComparator.isAtLeast(it.gmsVersionName, REQUIRED_GMS_VERSION)
+    }
+    val gmsCompanionNote = if (companion != null) {
+      "${companion.phoneModel}: Google Play services v${companion.gmsVersionName ?: "Not found"}"
+    } else {
+      "Please check your other device is also on Google Play services v$REQUIRED_GMS_VERSION+."
+    }
     val gmsItem = DependencyCheckItem(
       id = DependencyId.GMS_APK,
       stepNumber = 2,
@@ -358,6 +382,8 @@ class FeatureCheckerViewModel(
       requirementSummary = "Streamlines first-time Cross-device setup and fixes the stuck setup QR code issue.",
       detectedStatus = gmsDetected,
       isMet = gmsMet,
+      isLocalDeviceMet = gmsMet,
+      companionIsMet = companionGmsMet,
       hasUpdateAvailable = gmsUpdateAvailable,
       isChecked = manualCheckOverrides[DependencyId.GMS_APK] ?: gmsMet,
       whyNotOrFixInstruction = if (gmsMet) {
@@ -365,7 +391,7 @@ class FeatureCheckerViewModel(
       } else {
         "An APK update to v26.37 or newer is needed. Tap 'Update Apk' to update Google Play services in the Play Store."
       },
-      phoneRequirementNote = "Phone also needs Google Play services v26.37 or newer.",
+      phoneRequirementNote = gmsCompanionNote,
       actionLabel = "Update Apk",
       actionType = DependencyActionType.UPDATE_APK,
       targetPackage = GMS_PACKAGE
@@ -380,6 +406,14 @@ class FeatureCheckerViewModel(
     } else {
       "Not installed · requires v$REQUIRED_CROSS_DEVICE_VERSION+"
     }
+    val companionCrossMet = companion?.let {
+      VersionComparator.isAtLeast(it.crossDeviceVersionName, REQUIRED_CROSS_DEVICE_VERSION)
+    }
+    val crossCompanionNote = if (companion != null) {
+      "${companion.phoneModel}: Cross-device services v${companion.crossDeviceVersionName ?: "Not found"}"
+    } else {
+      "Please check your other device is also on Cross-device services v$REQUIRED_CROSS_DEVICE_VERSION+."
+    }
     val crossDeviceItem = DependencyCheckItem(
       id = DependencyId.CROSS_DEVICE_APK,
       stepNumber = 3,
@@ -387,6 +421,8 @@ class FeatureCheckerViewModel(
       requirementSummary = "Required for Continue On, Cast My Apps, Quick Access, and Notification Sync.",
       detectedStatus = crossDetected,
       isMet = crossDeviceMet,
+      isLocalDeviceMet = crossDeviceMet,
+      companionIsMet = companionCrossMet,
       status = if (crossDeviceMet) CheckStatus.MET else CheckStatus.NOT_MET,
       hasUpdateAvailable = crossDeviceUpdateAvailable,
       isChecked = manualCheckOverrides[DependencyId.CROSS_DEVICE_APK] ?: crossDeviceMet,
@@ -395,7 +431,7 @@ class FeatureCheckerViewModel(
       } else {
         "An APK update to v1.0.1346 or newer is needed. Tap 'Update Apk' to update Cross-device services."
       },
-      phoneRequirementNote = "Phone also needs Cross-device services v1.0.1346 or newer.",
+      phoneRequirementNote = crossCompanionNote,
       actionLabel = "Update Apk",
       actionType = DependencyActionType.UPDATE_APK,
       targetPackage = CROSS_DEVICE_PACKAGE
@@ -414,10 +450,16 @@ class FeatureCheckerViewModel(
       snapshot.wifiEthernetOnly -> "Connected via Ethernet LAN"
       else -> "Connected to Wi-Fi: $connectedWifiLabel"
     }
-    val wifiPhoneNote = if (usableSsid) {
-      "Phone should be connected to \"$connectedWifiLabel\" Wi-Fi (and charging to expedite background updates)."
-    } else {
-      "Phone should be connected to the same private home Wi-Fi network as this device (and charging to expedite background updates)."
+    val companionWifiMet = companion?.privateWifiConnected
+    val wifiPhoneNote = when {
+      companion != null && usableSsid ->
+        "${companion.phoneModel}: Private Wi-Fi ${if (companion.privateWifiConnected) "connected" else "not connected"} (match \"$connectedWifiLabel\")"
+      companion != null ->
+        "${companion.phoneModel}: Private Wi-Fi ${if (companion.privateWifiConnected) "connected" else "not connected"}"
+      usableSsid ->
+        "Please check your other device is also on Wi-Fi \"$connectedWifiLabel\" (and charging to expedite background updates)."
+      else ->
+        "Please check your other device is also on the same private home Wi-Fi network as this device (and charging to expedite background updates)."
     }
     val wifiWhyNot = when {
       !snapshot.wifiConnected ->
@@ -477,6 +519,8 @@ class FeatureCheckerViewModel(
       requirementSummary = "Public/guest networks and VPNs block local device-to-device discovery.",
       detectedStatus = wifiDetectedStatus,
       isMet = wifiMet,
+      isLocalDeviceMet = wifiMet,
+      companionIsMet = companionWifiMet,
       status = wifiStatus,
       hasUpdateAvailable = wifiNeedsLocation,
       isChecked = manualCheckOverrides[DependencyId.PRIVATE_WIFI] ?: wifiMet,
@@ -501,6 +545,12 @@ class FeatureCheckerViewModel(
       btMet -> CheckStatus.MET
       else -> CheckStatus.NOT_MET
     }
+    val companionBtMet = companion?.bluetoothEnabled
+    val btCompanionNote = if (companion != null) {
+      "${companion.phoneModel}: Bluetooth is ${if (companion.bluetoothEnabled) "on" else "off"}"
+    } else {
+      "Please check your other device also has Bluetooth turned on."
+    }
     val btItem = DependencyCheckItem(
       id = DependencyId.BLUETOOTH,
       stepNumber = 5,
@@ -508,6 +558,8 @@ class FeatureCheckerViewModel(
       requirementSummary = "Used alongside Wi-Fi to discover your nearby phone and complete pairing.",
       detectedStatus = btStatusText,
       isMet = btMet,
+      isLocalDeviceMet = btMet,
+      companionIsMet = companionBtMet,
       status = btStatusEnum,
       hasUpdateAvailable = false,
       isChecked = manualCheckOverrides[DependencyId.BLUETOOTH] ?: btMet,
@@ -516,7 +568,7 @@ class FeatureCheckerViewModel(
         btPermissionMissing -> "Grant Nearby devices (Bluetooth) permission so this app can verify whether Bluetooth is enabled."
         else -> "Bluetooth is turned off. Turn Bluetooth on for both your Googlebook and your phone."
       },
-      phoneRequirementNote = "Ensure Bluetooth is turned on for your phone as well.",
+      phoneRequirementNote = btCompanionNote,
       actionLabel = if (btPermissionMissing) "Grant Permission" else "Enable Bluetooth",
       actionType = if (btPermissionMissing) {
         DependencyActionType.REQUEST_BLUETOOTH_PERMISSION
@@ -555,19 +607,22 @@ class FeatureCheckerViewModel(
       requirementSummary = "Sign into the same personal Google account and enable Tasks, Apps, Notifications, and Files & media sharing, then restart both devices.",
       detectedStatus = continueStatusText,
       isMet = continueMet,
+      isLocalDeviceMet = continueMet,
+      companionIsMet = null,
       status = continueCheckStatus,
       hasUpdateAvailable = false,
       isChecked = manualCheckOverrides[DependencyId.CONTINUE_ACTIVITY_SETTINGS] ?: continueMet,
       whyNotOrFixInstruction = "In Settings > Cross-device services > Continue activity, turn on Tasks, Apps, Notifications, and Files & media sharing, then restart your phone and Googlebook.",
       warningOrAdvisoryNote = continueAdvisoryNote,
-      phoneRequirementNote = "Phone must be signed into the same personal Google account with all Continue activity toggles on.",
+      phoneRequirementNote = "Please check your other device is also on the same Google account with 'Continue activity' options turned on.",
       actionLabel = "Open Cross-Device Settings",
       actionType = DependencyActionType.OPEN_CROSS_DEVICE_SETTINGS
     )
 
     // 7. Device Build Type (LAST in checklist: user or userdbg, and BOTH devices must match!)
     val localBuildValid = isValidBuildType(snapshot.buildType)
-    val companionMatches = companion == null || areBuildTypesMatching(snapshot.buildType, companion.buildType)
+    val companionBuildMet = companion?.let { areBuildTypesMatching(snapshot.buildType, it.buildType) }
+    val companionMatches = companionBuildMet ?: true
     val buildMet = localBuildValid && companionMatches
     val normalizedLocal = normalizeBuildType(snapshot.buildType)
     val expectedPairLabel = if (normalizedLocal == "user") "user" else "userdbg"
@@ -575,6 +630,11 @@ class FeatureCheckerViewModel(
       "This device (${snapshot.deviceModel}): ${snapshot.buildType} · Phone (${companion.phoneModel}): ${companion.buildType}"
     } else {
       "This device (${snapshot.deviceModel}) build type: ${snapshot.buildType} (paired device must also be '$expectedPairLabel')"
+    }
+    val buildCompanionNote = if (companion != null) {
+      "${companion.phoneModel}: '${companion.buildType}' build (must match '$expectedPairLabel')."
+    } else {
+      "Please check your other device is also on a '$expectedPairLabel' build (most production phone builds are expected to be 'user' builds)."
     }
     val buildWhyNot = when {
       !localBuildValid ->
@@ -591,10 +651,12 @@ class FeatureCheckerViewModel(
       requirementSummary = "",
       detectedStatus = buildDetectedStatus,
       isMet = buildMet,
+      isLocalDeviceMet = localBuildValid,
+      companionIsMet = companionBuildMet,
       hasUpdateAvailable = false,
       isChecked = manualCheckOverrides[DependencyId.BUILD_TYPE] ?: buildMet,
       whyNotOrFixInstruction = buildWhyNot,
-      phoneRequirementNote = "If Googlebook is a 'user' build, phone must be a 'user' build; if Googlebook is 'userdbg', connected phone must be 'userdbg' too. Most production phone builds are expected to be 'user' builds.",
+      phoneRequirementNote = buildCompanionNote,
       actionLabel = "View Build Info",
       actionType = DependencyActionType.OPEN_DEVICE_INFO
     )

@@ -50,6 +50,8 @@ data class DependencyCheckItem(
   val requirementSummary: String,
   val detectedStatus: String,
   val isMet: Boolean,
+  val isLocalDeviceMet: Boolean = isMet,
+  val companionIsMet: Boolean? = null,
   val status: CheckStatus = if (isMet) CheckStatus.MET else CheckStatus.NOT_MET,
   val hasUpdateAvailable: Boolean = false,
   val isChecked: Boolean,

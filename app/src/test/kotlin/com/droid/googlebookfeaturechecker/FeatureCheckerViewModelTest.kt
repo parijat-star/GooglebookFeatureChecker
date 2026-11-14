@@ -90,12 +90,25 @@ class FeatureCheckerViewModelTest {
     assertTrue(buildDep.detectedStatus.contains("userdebug"))
     assertEquals("", buildDep.requirementSummary)
     assertFalse(buildDep.phoneRequirementNote.contains("Both your Googlebook and phone"))
+    assertTrue(buildDep.phoneRequirementNote.contains("Please check your other device is also on a 'userdbg' build"))
     assertTrue(buildDep.phoneRequirementNote.contains("production phone builds are expected to be 'user' builds"))
 
-    // Verify Wi-Fi item shows connected Wi-Fi name and phone requirement note for that named Wi-Fi
+    // Verify all 7 companion device guidance notes follow "Please check your other device..."
+    val androidDep = state.dependencies.first { it.id == DependencyId.ANDROID_VERSION }
+    assertTrue(androidDep.phoneRequirementNote.contains("Please check your other device is also on Android 17"))
+    val gmsDep = state.dependencies.first { it.id == DependencyId.GMS_APK }
+    assertTrue(gmsDep.phoneRequirementNote.contains("Please check your other device is also on Google Play services v26.37+"))
+    val crossDep = state.dependencies.first { it.id == DependencyId.CROSS_DEVICE_APK }
+    assertTrue(crossDep.phoneRequirementNote.contains("Please check your other device is also on Cross-device services v1.0.1346+"))
+    val btDep = state.dependencies.first { it.id == DependencyId.BLUETOOTH }
+    assertTrue(btDep.phoneRequirementNote.contains("Please check your other device also has Bluetooth turned on"))
+    val continueDep = state.dependencies.first { it.id == DependencyId.CONTINUE_ACTIVITY_SETTINGS }
+    assertTrue(continueDep.phoneRequirementNote.contains("Please check your other device is also on the same Google account"))
+
+    // Verify Wi-Fi item shows connected Wi-Fi name and companion requirement note for that named Wi-Fi
     val wifiDep = state.dependencies.first { it.id == DependencyId.PRIVATE_WIFI }
     assertTrue(wifiDep.detectedStatus.contains("Home_5G"))
-    assertTrue(wifiDep.phoneRequirementNote.contains("Phone should be connected to \"Home_5G\" Wi-Fi"))
+    assertTrue(wifiDep.phoneRequirementNote.contains("Please check your other device is also on Wi-Fi \"Home_5G\""))
     assertEquals("Fix Wi-Fi", wifiDep.actionLabel)
   }
 
@@ -245,7 +258,7 @@ class FeatureCheckerViewModelTest {
     assertTrue(wifiDep.shouldShowActionButton)
     assertEquals("Pause VPN", wifiDep.actionLabel)
     assertTrue(wifiDep.detectedStatus.contains("Airport_Free_WiFi"))
-    assertTrue(wifiDep.phoneRequirementNote.contains("Phone should be connected to \"Airport_Free_WiFi\" Wi-Fi"))
+    assertTrue(wifiDep.phoneRequirementNote.contains("Please check your other device is also on Wi-Fi \"Airport_Free_WiFi\""))
     assertFalse(wifiDep.isChecked)
     assertTrue(wifiDep.whyNotOrFixInstruction.contains("private", ignoreCase = true))
     assertEquals(DependencyActionType.OPEN_WIFI_SETTINGS, wifiDep.actionType)
@@ -377,6 +390,82 @@ class FeatureCheckerViewModelTest {
       val wifiGrantedDep = vm.uiState.value.dependencies.first { it.id == DependencyId.PRIVATE_WIFI }
       assertTrue(wifiGrantedDep.isMet)
       assertEquals(CheckStatus.WARNING, wifiGrantedDep.status)
+    } finally {
+      Dispatchers.resetMain()
+    }
+  }
+
+  @Test
+  fun isRequiredPermissionGranted_rejectsApproximateOnlyLocationAndChecksBluetoothConnect() {
+    // Coarse-only location on Android 12+ must return false so App Permissions fallback triggers
+    assertFalse(
+      isRequiredPermissionGranted(
+        DependencyActionType.REQUEST_LOCATION_PERMISSION,
+        mapOf(
+          android.Manifest.permission.ACCESS_FINE_LOCATION to false,
+          android.Manifest.permission.ACCESS_COARSE_LOCATION to true
+        ),
+        sdkInt = 34
+      )
+    )
+    assertTrue(
+      isRequiredPermissionGranted(
+        DependencyActionType.REQUEST_LOCATION_PERMISSION,
+        mapOf(
+          android.Manifest.permission.ACCESS_FINE_LOCATION to true,
+          android.Manifest.permission.ACCESS_COARSE_LOCATION to true
+        ),
+        sdkInt = 34
+      )
+    )
+    // Bluetooth on Android 12+ (API 31+) requires BLUETOOTH_CONNECT
+    assertFalse(
+      isRequiredPermissionGranted(
+        DependencyActionType.REQUEST_BLUETOOTH_PERMISSION,
+        mapOf(android.Manifest.permission.BLUETOOTH_CONNECT to false),
+        sdkInt = 34
+      )
+    )
+    assertTrue(
+      isRequiredPermissionGranted(
+        DependencyActionType.REQUEST_BLUETOOTH_PERMISSION,
+        mapOf(android.Manifest.permission.BLUETOOTH_CONNECT to true),
+        sdkInt = 34
+      )
+    )
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  @Test
+  fun concurrentRefreshChecksAsync_cancelsStaleRefreshJobSoNewestStateWins() = runTest {
+    val testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler)
+    Dispatchers.setMain(testDispatcher)
+    try {
+      var callCount = 0
+      val slowThenFastProvider = object : DeviceEnvironmentProvider {
+        override fun readLocalSystemSnapshot(): DeviceSystemSnapshot {
+          callCount++
+          return if (callCount == 1) {
+            FakeDeviceEnvironmentProvider().snapshot.copy(hasLocationPermission = false)
+          } else {
+            FakeDeviceEnvironmentProvider().snapshot.copy(hasLocationPermission = true)
+          }
+        }
+        override fun probeCompanionPhone(): CompanionPhoneSnapshot? = null
+      }
+      val vm = FeatureCheckerViewModel(
+        environmentProvider = slowThenFastProvider,
+        ioDispatcher = testDispatcher,
+        loadSynchronously = true
+      )
+      // Trigger first async refresh (will read callCount==2 -> hasLocationPermission=true if run alone, let's reset callCount=0)
+      callCount = 0
+      vm.refreshChecksAsync(bannerMessage = "Stale pre-permission refresh")
+      // Immediately trigger second async refresh before first completes
+      vm.refreshChecksAsync(bannerMessage = "Fresh post-permission refresh")
+      testScheduler.advanceUntilIdle()
+
+      assertEquals("Fresh post-permission refresh", vm.uiState.value.statusBannerMessage)
     } finally {
       Dispatchers.resetMain()
     }

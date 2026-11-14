@@ -106,10 +106,16 @@ class FeatureCheckerScreenTest {
       }
     }
 
-    // Verify title & feature card, and confirm build type card is no longer in the left pane
+    // Verify title, feature card, and two-column ("This device" & "Companion device") headers
     composeTestRule.onNodeWithText("Googlebook Feature Checker").assertIsDisplayed()
     composeTestRule.onNodeWithTag("feature_card_better_together").assertIsDisplayed()
     composeTestRule.onNodeWithTag("build_type_callout_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("column_header_this_device").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("column_header_companion_device").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("this_device_column_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("companion_device_column_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("met_badge_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Please check your other device is also on Android 17", substring = true).assertIsDisplayed()
 
     // Scroll to GMS_APK dependency (step #2, outdated !isMet -> shows "Update Apk" and NO row checkmark)
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
@@ -130,11 +136,12 @@ class FeatureCheckerScreenTest {
     composeTestRule.onNodeWithTag("update_available_button_CROSS_DEVICE_APK").performClick()
     assertEquals(DependencyId.CROSS_DEVICE_APK, lastExecutedAction?.id)
 
-    // Verify PRIVATE_WIFI (step #4, unmet public/captive -> shows "Switch Wi-Fi")
+    // Verify PRIVATE_WIFI (step #4, unmet public/captive -> shows "Switch Wi-Fi" under This device and Wi-Fi name under Companion device)
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
       .performScrollToNode(hasTestTag("dependency_card_PRIVATE_WIFI"))
     composeTestRule.onNodeWithTag("action_button_PRIVATE_WIFI").assertIsDisplayed()
     composeTestRule.onNodeWithText("Switch Wi-Fi").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Please check your other device is also on Wi-Fi \"Home_5G\"", substring = true).assertIsDisplayed()
 
     // Scroll to BUILD_TYPE at the end of the checklist (step #7) -> listed as a dependency with NO click-mark and NO Met badge
     composeTestRule.onNodeWithTag("dependencies_lazy_column")
@@ -201,6 +208,14 @@ class FeatureCheckerScreenTest {
 
     composeTestRule.onNodeWithText("Googlebook Feature Checker").assertIsDisplayed()
     composeTestRule.onNodeWithTag("recheck_all_button").assertIsDisplayed()
+
+    // Scroll to ANDROID_VERSION (#1) on compact phone -> verify two-column grid ("This device" & "Companion device")
+    composeTestRule.onNodeWithTag("dependencies_lazy_column")
+      .performScrollToNode(hasTestTag("dependency_card_ANDROID_VERSION"))
+    composeTestRule.onNodeWithTag("this_device_column_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("companion_device_column_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("met_badge_ANDROID_VERSION", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("Please check your other device is also on Android 17", substring = true).assertIsDisplayed()
 
     // Scroll to Cross-device services (#3) -> met with NO Update Available button
     composeTestRule.onNodeWithTag("dependencies_lazy_column")

@@ -825,6 +825,10 @@ private fun GooglebookAndPixelLineArt(
   }
 }
 
+private const val DEPENDENCY_INFO_WEIGHT = 1.25f
+private const val THIS_DEVICE_COL_WEIGHT = 0.85f
+private const val COMPANION_DEVICE_COL_WEIGHT = 1.05f
+
 @Composable
 private fun StudioDependenciesColumn(
   uiState: FeatureCheckerUiState,
@@ -868,14 +872,74 @@ private fun StudioDependenciesColumn(
       }
     }
 
-    // Group 1: Dependencies Checklist (7 items in Android 16 / googlebook.studio grouped rows)
+    // Group 1: Dependencies Checklist with "This device" & "Companion device" column headers
     item {
-      Text(
-        text = "Dependencies",
-        modifier = Modifier.padding(horizontal = if (isCompactPhone) 12.dp else 20.dp),
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary
-      )
+      if (isCompactPhone) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Text(
+            text = "Dependencies",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+          )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Text(
+              text = "This device",
+              modifier = Modifier
+                .weight(1f)
+                .testTag("column_header_this_device"),
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+              text = "Companion device",
+              modifier = Modifier
+                .weight(1f)
+                .testTag("column_header_companion_device"),
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        }
+      } else {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          Text(
+            text = "Dependencies",
+            modifier = Modifier.weight(DEPENDENCY_INFO_WEIGHT),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+          )
+          Text(
+            text = "This device",
+            modifier = Modifier
+              .weight(THIS_DEVICE_COL_WEIGHT)
+              .testTag("column_header_this_device"),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+          )
+          Text(
+            text = "Companion device",
+            modifier = Modifier
+              .weight(COMPANION_DEVICE_COL_WEIGHT)
+              .testTag("column_header_companion_device"),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary
+          )
+        }
+      }
     }
 
     items(
@@ -886,6 +950,7 @@ private fun StudioDependenciesColumn(
       val shape = groupShape(index, uiState.dependencies.size)
       DependencySettingRow(
         item = item,
+        localBuildType = uiState.localBuildType,
         shape = shape,
         isFocused = index == uiState.focusedDependencyIndex,
         isCompactPhone = isCompactPhone,
@@ -919,6 +984,7 @@ private fun StudioDependenciesColumn(
 @Composable
 private fun DependencySettingRow(
   item: DependencyCheckItem,
+  localBuildType: String,
   shape: RoundedCornerShape,
   isFocused: Boolean,
   isCompactPhone: Boolean,
@@ -926,6 +992,8 @@ private fun DependencySettingRow(
   onFocus: () -> Unit,
   onExecuteAction: () -> Unit
 ) {
+  @Suppress("UNUSED_VARIABLE")
+  val unusedToggle = onToggleCheckMark
   val studio = LocalStudioColors.current
   val interactionSource = remember { MutableInteractionSource() }
   val isHovered by interactionSource.collectIsHoveredAsState()
@@ -955,204 +1023,183 @@ private fun DependencySettingRow(
           false
         }
       }
-      .clickable {
-        onFocus()
-      }
+      .clickable { onFocus() }
       .padding(horizontal = if (isCompactPhone) 14.dp else 20.dp, vertical = 14.dp)
       .testTag("dependency_card_${item.id.name}"),
-    verticalArrangement = Arrangement.spacedBy(6.dp)
+    verticalArrangement = Arrangement.spacedBy(10.dp)
   ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(if (isCompactPhone) 10.dp else 14.dp)
-    ) {
-      @Suppress("UNUSED_VARIABLE")
-      val unusedToggle = onToggleCheckMark
+    if (isCompactPhone) {
+      DependencyDescriptionBlock(item = item, isBuildTypeRow = isBuildTypeRow)
 
-      Column(
-        modifier = Modifier.weight(1f),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        Text(
-          text = "${item.stepNumber}. ${item.title}",
-          style = MaterialTheme.typography.bodyLarge,
-          color = MaterialTheme.colorScheme.onSurface
-        )
-        Text(
-          text = if (item.requirementSummary.isNotBlank()) {
-            "${item.detectedStatus} · ${item.requirementSummary}"
-          } else {
-            item.detectedStatus
-          },
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-      }
-
-      // Status & Action Column (omitted on #7 Matching device build type since phone type cannot be confirmed locally):
-      if (!isBuildTypeRow) {
-        val showInlineAction = item.status == CheckStatus.NOT_MET ||
-          item.status == CheckStatus.PERMISSION_REQUIRED ||
-          item.status == CheckStatus.ADVISORY
-        when (item.status) {
-          CheckStatus.ADVISORY -> {
-            Column(
-              horizontalAlignment = Alignment.End,
-              verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(10.dp))
-                  .background(studio.advisoryContainer)
-                  .padding(horizontal = 12.dp, vertical = 6.dp)
-                  .testTag("advisory_badge_${item.id.name}")
-              ) {
-                Text(
-                  text = "Verify",
-                  style = MaterialTheme.typography.labelMedium,
-                  color = studio.onAdvisoryContainer
-                )
-              }
-              if (!isCompactPhone) {
-                Button(
-                  onClick = {
-                    onFocus()
-                    onExecuteAction()
-                  },
-                  shape = RoundedCornerShape(16.dp),
-                  colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                  ),
-                  contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                  modifier = Modifier.testTag("action_button_${item.id.name}")
-                ) {
-                  Text(
-                    text = item.actionLabel,
-                    style = MaterialTheme.typography.labelMedium
-                  )
-                }
-              }
-            }
-          }
-          CheckStatus.NOT_MET, CheckStatus.PERMISSION_REQUIRED -> {
-            if (!isCompactPhone) {
-              Button(
-                onClick = {
-                  onFocus()
-                  onExecuteAction()
-                },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                  containerColor = MaterialTheme.colorScheme.primary,
-                  contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                modifier = Modifier.testTag("action_button_${item.id.name}")
-              ) {
-                Text(
-                  text = item.actionLabel,
-                  style = MaterialTheme.typography.labelMedium
-                )
-              }
-            }
-          }
-          CheckStatus.MET, CheckStatus.WARNING -> {
-            Column(
-              horizontalAlignment = Alignment.End,
-              verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              // Green Met checkmark box
-              Box(
-                modifier = Modifier
-                  .clip(RoundedCornerShape(10.dp))
-                  .background(studio.metGreenContainer)
-                  .padding(horizontal = 12.dp, vertical = 6.dp)
-                  .testTag("met_badge_${item.id.name}")
-              ) {
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = null,
-                    tint = studio.onMetGreenContainer,
-                    modifier = Modifier.size(15.dp)
-                  )
-                  Text(
-                    text = if (item.status == CheckStatus.WARNING) "Met (Check)" else "Met",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = studio.onMetGreenContainer
-                  )
-                }
-              }
-
-              // Secondary action button under Met when an update or permission upgrade is available
-              if (item.hasUpdateAvailable) {
-                val secondaryLabel = if (item.actionLabel.startsWith("Grant")) {
-                  item.actionLabel
-                } else {
-                  "Update Available"
-                }
-                Button(
-                  onClick = {
-                    onFocus()
-                    onExecuteAction()
-                  },
-                  shape = RoundedCornerShape(12.dp),
-                  colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                  ),
-                  contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                  modifier = Modifier.testTag("update_available_button_${item.id.name}")
-                ) {
-                  Text(
-                    text = secondaryLabel,
-                    style = MaterialTheme.typography.labelMedium
-                  )
-                }
-              }
-            }
-          }
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          Text(
+            text = "This device",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+          )
+          ThisDeviceStatusCell(
+            item = item,
+            localBuildType = localBuildType,
+            isBuildTypeRow = isBuildTypeRow,
+            onFocus = onFocus,
+            onExecuteAction = onExecuteAction
+          )
         }
-        @Suppress("UNUSED_VARIABLE")
-        val unused = showInlineAction
+
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+          Text(
+            text = "Companion device",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
+          )
+          CompanionDeviceStatusCell(
+            item = item,
+            modifier = Modifier.fillMaxWidth()
+          )
+        }
+      }
+    } else {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+      ) {
+        DependencyDescriptionBlock(
+          item = item,
+          isBuildTypeRow = isBuildTypeRow,
+          modifier = Modifier.weight(DEPENDENCY_INFO_WEIGHT)
+        )
+
+        ThisDeviceStatusCell(
+          item = item,
+          localBuildType = localBuildType,
+          isBuildTypeRow = isBuildTypeRow,
+          onFocus = onFocus,
+          onExecuteAction = onExecuteAction,
+          modifier = Modifier.weight(THIS_DEVICE_COL_WEIGHT)
+        )
+
+        CompanionDeviceStatusCell(
+          item = item,
+          modifier = Modifier.weight(COMPANION_DEVICE_COL_WEIGHT)
+        )
       }
     }
+  }
+}
 
-    // Explanation when not met, warning/advisory details, plus phone requirement callout
-    Column(
-      verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-      val needsActionRow = !isBuildTypeRow &&
-        (item.status == CheckStatus.NOT_MET ||
-          item.status == CheckStatus.PERMISSION_REQUIRED ||
-          item.status == CheckStatus.ADVISORY)
+@Composable
+private fun DependencyDescriptionBlock(
+  item: DependencyCheckItem,
+  isBuildTypeRow: Boolean,
+  modifier: Modifier = Modifier
+) {
+  val studio = LocalStudioColors.current
+  Column(
+    modifier = modifier,
+    verticalArrangement = Arrangement.spacedBy(4.dp)
+  ) {
+    Text(
+      text = "${item.stepNumber}. ${item.title}",
+      style = MaterialTheme.typography.bodyLarge,
+      color = MaterialTheme.colorScheme.onSurface
+    )
+    Text(
+      text = if (item.requirementSummary.isNotBlank()) {
+        "${item.detectedStatus} · ${item.requirementSummary}"
+      } else {
+        item.detectedStatus
+      },
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    if (!item.isMet && !isBuildTypeRow && item.status != CheckStatus.ADVISORY) {
+      Text(
+        text = item.whyNotOrFixInstruction,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.tertiary
+      )
+    }
+    if (!item.warningOrAdvisoryNote.isNullOrBlank() && !isBuildTypeRow) {
+      Text(
+        text = item.warningOrAdvisoryNote,
+        style = MaterialTheme.typography.bodySmall,
+        color = studio.onAdvisoryContainer,
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(8.dp))
+          .background(studio.advisoryContainer)
+          .padding(horizontal = 10.dp, vertical = 6.dp)
+          .testTag("advisory_note_${item.id.name}")
+      )
+    }
+  }
+}
 
-      if (!item.isMet && !isBuildTypeRow && item.status != CheckStatus.ADVISORY) {
+@Composable
+private fun ThisDeviceStatusCell(
+  item: DependencyCheckItem,
+  localBuildType: String,
+  isBuildTypeRow: Boolean,
+  onFocus: () -> Unit,
+  onExecuteAction: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val studio = LocalStudioColors.current
+
+  Column(
+    modifier = modifier.testTag("this_device_column_${item.id.name}"),
+    horizontalAlignment = Alignment.Start,
+    verticalArrangement = Arrangement.spacedBy(6.dp)
+  ) {
+    if (isBuildTypeRow) {
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(10.dp))
+          .background(
+            if (item.isLocalDeviceMet) studio.chrome.copy(alpha = 0.75f) else studio.warnContainer
+          )
+          .padding(horizontal = 12.dp, vertical = 6.dp)
+      ) {
         Text(
-          text = item.whyNotOrFixInstruction,
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.tertiary
+          text = "Build: ${localBuildType.ifBlank { "unknown" }}",
+          style = MaterialTheme.typography.labelMedium,
+          color = if (item.isLocalDeviceMet) MaterialTheme.colorScheme.onSurface else studio.onWarnContainer,
+          maxLines = 1,
+          softWrap = false
         )
       }
-      if (!item.warningOrAdvisoryNote.isNullOrBlank() && !isBuildTypeRow) {
-        Text(
-          text = item.warningOrAdvisoryNote,
-          style = MaterialTheme.typography.bodySmall,
-          color = studio.onAdvisoryContainer,
+      return
+    }
+
+    when (item.status) {
+      CheckStatus.ADVISORY -> {
+        Box(
           modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(studio.advisoryContainer)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag("advisory_note_${item.id.name}")
-        )
-      }
-      if (needsActionRow && isCompactPhone) {
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("advisory_badge_${item.id.name}")
+        ) {
+          Text(
+            text = "Verify",
+            style = MaterialTheme.typography.labelMedium,
+            color = studio.onAdvisoryContainer,
+            maxLines = 1,
+            softWrap = false
+          )
+        }
         Button(
           onClick = {
             onFocus()
@@ -1163,7 +1210,7 @@ private fun DependencySettingRow(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
           ),
-          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
           modifier = Modifier.testTag("action_button_${item.id.name}")
         ) {
           Text(
@@ -1172,11 +1219,180 @@ private fun DependencySettingRow(
           )
         }
       }
-      Text(
-        text = item.phoneRequirementNote,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-      )
+
+      CheckStatus.NOT_MET, CheckStatus.PERMISSION_REQUIRED -> {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(studio.warnContainer)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .testTag("not_met_badge_${item.id.name}")
+        ) {
+          Text(
+            text = if (item.status == CheckStatus.PERMISSION_REQUIRED) "Permission needed" else "Not met",
+            style = MaterialTheme.typography.labelMedium,
+            color = studio.onWarnContainer,
+            maxLines = 1,
+            softWrap = false
+          )
+        }
+        Button(
+          onClick = {
+            onFocus()
+            onExecuteAction()
+          },
+          shape = RoundedCornerShape(14.dp),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+          ),
+          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+          modifier = Modifier.testTag("action_button_${item.id.name}")
+        ) {
+          Text(
+            text = item.actionLabel,
+            style = MaterialTheme.typography.labelMedium
+          )
+        }
+      }
+
+      CheckStatus.MET, CheckStatus.WARNING -> {
+        // Green Met checkmark box against "This device"
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(studio.metGreenContainer)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("met_badge_${item.id.name}")
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.Check,
+              contentDescription = null,
+              tint = studio.onMetGreenContainer,
+              modifier = Modifier.size(15.dp)
+            )
+            Text(
+              text = if (item.status == CheckStatus.WARNING) "Met (Check)" else "Met",
+              style = MaterialTheme.typography.labelMedium,
+              color = studio.onMetGreenContainer,
+              maxLines = 1,
+              softWrap = false
+            )
+          }
+        }
+
+        if (item.hasUpdateAvailable) {
+          val secondaryLabel = if (item.actionLabel.startsWith("Grant")) {
+            item.actionLabel
+          } else {
+            "Update Available"
+          }
+          Button(
+            onClick = {
+              onFocus()
+              onExecuteAction()
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = MaterialTheme.colorScheme.secondaryContainer,
+              contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.testTag("update_available_button_${item.id.name}")
+          ) {
+            Text(
+              text = secondaryLabel,
+              style = MaterialTheme.typography.labelMedium
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun CompanionDeviceStatusCell(
+  item: DependencyCheckItem,
+  modifier: Modifier = Modifier
+) {
+  val studio = LocalStudioColors.current
+
+  Column(
+    modifier = modifier
+      .clip(RoundedCornerShape(12.dp))
+      .background(studio.chrome.copy(alpha = 0.6f))
+      .padding(horizontal = 12.dp, vertical = 8.dp)
+      .testTag("companion_device_column_${item.id.name}"),
+    verticalArrangement = Arrangement.spacedBy(5.dp)
+  ) {
+    when (item.companionIsMet) {
+      true -> {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(studio.metGreenContainer)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.Check,
+              contentDescription = null,
+              tint = studio.onMetGreenContainer,
+              modifier = Modifier.size(12.dp)
+            )
+            Text(
+              text = "Met",
+              style = MaterialTheme.typography.labelMedium,
+              color = studio.onMetGreenContainer,
+              maxLines = 1,
+              softWrap = false
+            )
+          }
+        }
+        Text(
+          text = item.phoneRequirementNote,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+
+      false -> {
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(studio.warnContainer)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+          Text(
+            text = "Not met",
+            style = MaterialTheme.typography.labelMedium,
+            color = studio.onWarnContainer,
+            maxLines = 1,
+            softWrap = false
+          )
+        }
+        Text(
+          text = item.phoneRequirementNote,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.tertiary
+        )
+      }
+
+      null -> {
+        Text(
+          text = item.phoneRequirementNote,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
     }
   }
 }

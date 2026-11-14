@@ -399,4 +399,103 @@ class FuzzAndSecurityTest {
     val validUrlResp = launcher.openReferenceSupportThread()
     assertTrue(validUrlResp.isNotBlank())
   }
+
+  @Test
+  fun fuzzWifiIsolationAnalyzer_andPermissionGuard_andViewModelSsidExtractionResistMalformedInputs() {
+    // 1. Fuzz WifiIsolationAnalyzer.tokenizeSsid, IPv4 classifiers, and full analyze() across 1,000 randomized payloads
+    val rng = Random(20261113)
+    val fuzzChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-\" ()[]{}<>:/\\\u0000\u202E\uFFFD\n\r\t🔥🌐"
+    repeat(1000) {
+      val len = rng.nextInt(0, 260)
+      val randomSsid = buildString(len) { repeat(len) { append(fuzzChars[rng.nextInt(fuzzChars.length)]) } }
+      val ipLen = rng.nextInt(0, 64)
+      val randomIp = buildString(ipLen) { repeat(ipLen) { append(fuzzChars[rng.nextInt(fuzzChars.length)]) } }
+      val randomPrefix = if (rng.nextBoolean()) rng.nextInt(-128, 256) else null
+
+      val tokens = WifiIsolationAnalyzer.tokenizeSsid(randomSsid)
+      assertTrue(tokens.all { token -> token.isNotEmpty() && token.all { c -> c in 'a'..'z' || c in '0'..'9' } })
+
+      // IPv4 classifiers must never throw on malformed/arbitrary inputs
+      val isLinkLocal = WifiIsolationAnalyzer.isLinkLocalIpv4(randomIp)
+      val isCgnat = WifiIsolationAnalyzer.isCgnatIpv4(randomIp)
+      val isPrivate = WifiIsolationAnalyzer.isRfc1918PrivateIpv4(randomIp)
+      // Link-local, CGNAT, and RFC 1918 ranges are mutually exclusive
+      val trueCount = listOf(isLinkLocal, isCgnat, isPrivate).count { it }
+      assertTrue(trueCount <= 1)
+
+      val telemetry = WifiNetworkTelemetry(
+        hasWifiTransport = rng.nextBoolean(),
+        hasEthernetTransport = rng.nextBoolean(),
+        hasCellularTransport = rng.nextBoolean(),
+        isCaptivePortal = rng.nextBoolean(),
+        isRestricted = rng.nextBoolean(),
+        isNotMetered = rng.nextBoolean(),
+        isTrusted = rng.nextBoolean(),
+        isVpnActive = rng.nextBoolean(),
+        isOpenUnencryptedWifi = rng.nextBoolean(),
+        isEnterpriseOrPasspointWifi = rng.nextBoolean(),
+        isEphemeralOrCarrierMerged = rng.nextBoolean(),
+        ssidOrNetworkHint = if (rng.nextBoolean()) randomSsid else null,
+        ipv4Address = if (rng.nextBoolean()) randomIp else null,
+        ipv4PrefixLength = randomPrefix,
+        gatewayReachableOrMulticastOk = rng.nextBoolean(),
+        apIsolationVerified = rng.nextBoolean(),
+        hasLocationPermission = rng.nextBoolean(),
+        gatewayPingTimedOut = rng.nextBoolean()
+      )
+      val res = WifiIsolationAnalyzer.analyze(telemetry)
+      assertFalse(res.connectedWifiName.contains('\u202E'))
+      assertFalse(res.connectedWifiName.contains('\u0000'))
+      assertTrue(res.statusSummary.isNotBlank())
+      assertTrue(res.detailedExplanation.isNotBlank())
+    }
+
+    // 2. Fuzz isRequiredPermissionGranted across random permission maps, SDK levels, and action types
+    val permNames = listOf(
+      android.Manifest.permission.ACCESS_FINE_LOCATION,
+      android.Manifest.permission.ACCESS_COARSE_LOCATION,
+      android.Manifest.permission.BLUETOOTH_CONNECT,
+      "com.example.UNKNOWN_PERMISSION",
+      ""
+    )
+    val actionTypes: List<DependencyActionType?> = DependencyActionType.entries + listOf(null)
+    repeat(500) {
+      val map = buildMap {
+        repeat(rng.nextInt(0, 6)) {
+          put(permNames[rng.nextInt(permNames.size)], rng.nextBoolean())
+        }
+      }
+      val sdk = rng.nextInt(21, 42)
+      val action = actionTypes[rng.nextInt(actionTypes.size)]
+      val granted = isRequiredPermissionGranted(action, map, sdk)
+      if (action == DependencyActionType.REQUEST_LOCATION_PERMISSION &&
+        map[android.Manifest.permission.ACCESS_FINE_LOCATION] != true
+      ) {
+        assertFalse("Approximate-only or denied fine location must never be accepted as granted", granted)
+      }
+    }
+
+    // 3. Fuzz FeatureCheckerViewModel SSID & buildType evaluation with 300 randomized snapshots
+    val provider = FakeDeviceEnvironmentProvider()
+    val vm = com.droid.googlebookfeaturechecker.ui.FeatureCheckerViewModel(provider)
+    repeat(300) {
+      val len = rng.nextInt(0, 180)
+      val randomNetDesc = buildString(len) { repeat(len) { append(fuzzChars[rng.nextInt(fuzzChars.length)]) } }
+      val randomBuild = buildString(rng.nextInt(0, 40)) { repeat(rng.nextInt(0, 40)) { append(fuzzChars[rng.nextInt(fuzzChars.length)]) } }
+      provider.snapshot = provider.snapshot.copy(
+        buildType = randomBuild,
+        connectedWifiName = if (rng.nextBoolean()) randomNetDesc else null,
+        networkSsidOrDescription = randomNetDesc,
+        wifiConnected = rng.nextBoolean(),
+        wifiEthernetOnly = rng.nextBoolean(),
+        wifiHasKnownSsid = rng.nextBoolean(),
+        hasLocationPermission = rng.nextBoolean(),
+        isPublicOrCaptiveWifi = rng.nextBoolean(),
+        vpnActive = rng.nextBoolean()
+      )
+      vm.refreshChecks()
+      assertEquals(7, vm.uiState.value.dependencies.size)
+      assertNotNull(vm.buildDiagnosticFeedbackReport())
+    }
+  }
 }
